@@ -25,22 +25,22 @@ pnpm test                                    # 46 tests
 pnpm goblin run examples/order-triage.json --input '{"total":250,"lines":[{"sku":"A","qty":2,"price":30}]}'
 ```
 
-```
-  → trigger
-  → classify
-  · flagNormal skipped — every required input was pruned
-  → merge
-  ⟳ eachLine over 2 items
-  → priceLine @eachLine[0]
-  → priceLine @eachLine[1]
-  → summary
-  ✓ run succeeded in 4ms
-```
+<p align="center">
+  <img src="assets/goblinkit-run.webp" alt="goblin run: the trace of one workflow — a branch taken, the other skipped, a merge, and a loop whose two passes are addressed separately." width="900">
+</p>
 
 Note `@eachLine[0]` and `@eachLine[1]`: every pass through a loop is addressed
 individually, so it has its own journal entries and its own inspectable output. An
 engine keyed by node id alone overwrites the same record each iteration and loses the
 history entirely.
+
+Every run writes a journal, and the run's state is a fold of it — never stored,
+always derived:
+
+<p align="center">
+  <img src="assets/goblinkit-replay.webp" alt="goblin replay: 32 journal entries folded back into the finished run state." width="900">
+</p>
+
 
 | Built | Package |
 |---|---|

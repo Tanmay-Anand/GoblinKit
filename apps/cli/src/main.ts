@@ -186,7 +186,7 @@ function printRun(journal: readonly JournalEntry[], ms: number): void {
         stderr.write(`  · ${entry.nodeId} skipped — ${entry.reason}\n`);
         break;
       case 'ScopeOpened':
-        stderr.write(`  ⟳ ${entry.scope.scopeId} over ${entry.scope.items.length} items\n`);
+        stderr.write(`  ↻ ${entry.scope.scopeId} over ${entry.scope.items.length} items\n`);
         break;
       case 'TimerScheduled':
         stderr.write(`  ⏲ ${entry.timer.purpose} ${entry.timer.fireAt - entry.at}ms\n`);
