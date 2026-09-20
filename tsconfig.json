@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@goblin/spec": ["packages/spec/src/index.ts"],
+      "@goblin/graph": ["packages/graph/src/index.ts"],
+      "@goblin/expressions": ["packages/expressions/src/index.ts"],
+      "@goblin/runtime": ["packages/runtime/src/index.ts"],
+      "@goblin/node-sdk": ["packages/node-sdk/src/index.ts"],
+      "@goblin/nodes-core": ["packages/nodes-core/src/index.ts"],
+      "@goblin/drivers-inprocess": ["packages/drivers-inprocess/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "*.ts"]
+}

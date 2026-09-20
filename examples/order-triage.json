@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "id": "wf_order_triage",
+  "tenantId": "demo",
+  "name": "Order triage",
+  "description": "Branch on order value, loop over the line items, merge both paths.",
+  "variables": {
+    "highValueThreshold": 100
+  },
+  "nodes": [
+    {
+      "id": "trigger",
+      "type": "core.trigger.manual",
+      "typeVersion": 1,
+      "label": "Order received",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "classify",
+      "type": "core.control.if",
+      "typeVersion": 1,
+      "label": "High value?",
+      "config": {
+        "condition": "{{ $json.total > $vars.highValueThreshold }}"
+      },
+      "ui": {
+        "position": {
+          "x": 220,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "flagHigh",
+      "type": "core.transform.set",
+      "typeVersion": 1,
+      "label": "Flag for review",
+      "config": {
+        "values": {
+          "queue": "manual-review",
+          "priority": "high"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": -80
+        }
+      }
+    },
+    {
+      "id": "flagNormal",
+      "type": "core.transform.set",
+      "typeVersion": 1,
+      "label": "Auto-approve",
+      "config": {
+        "values": {
+          "queue": "auto",
+          "priority": "normal"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 80
+        }
+      }
+    },
+    {
+      "id": "merge",
+      "type": "core.control.merge",
+      "typeVersion": 1,
+      "label": "Whichever ran",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 700,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "eachLine",
+      "type": "core.scope.forEach",
+      "typeVersion": 1,
+      "label": "Each line item",
+      "config": {
+        "items": "{{ $json.lines }}",
+        "maxIterations": 50
+      },
+      "ui": {
+        "position": {
+          "x": 920,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "priceLine",
+      "type": "core.transform.set",
+      "typeVersion": 1,
+      "label": "Price the line",
+      "config": {
+        "values": {
+          "sku": "{{ $json.sku }}",
+          "lineTotal": "{{ $json.qty * $json.price }}"
+        },
+        "keepInput": false
+      },
+      "ui": {
+        "position": {
+          "x": 1140,
+          "y": -60
+        }
+      }
+    },
+    {
+      "id": "endLines",
+      "type": "core.scope.end",
+      "typeVersion": 1,
+      "label": "End loop",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 1360,
+          "y": -60
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "type": "core.log",
+      "typeVersion": 1,
+      "label": "Summarise",
+      "config": {
+        "message": "priced {{ length($items) }} lines"
+      },
+      "ui": {
+        "position": {
+          "x": 1580,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": {
+        "node": "trigger",
+        "port": "main"
+      },
+      "to": {
+        "node": "classify",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "classify",
+        "port": "true"
+      },
+      "to": {
+        "node": "flagHigh",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "classify",
+        "port": "false"
+      },
+      "to": {
+        "node": "flagNormal",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "flagHigh",
+        "port": "main"
+      },
+      "to": {
+        "node": "merge",
+        "port": "a"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "flagNormal",
+        "port": "main"
+      },
+      "to": {
+        "node": "merge",
+        "port": "b"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "merge",
+        "port": "main"
+      },
+      "to": {
+        "node": "eachLine",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "eachLine",
+        "port": "item"
+      },
+      "to": {
+        "node": "priceLine",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "priceLine",
+        "port": "main"
+      },
+      "to": {
+        "node": "endLines",
+        "port": "main"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "eachLine",
+        "port": "done"
+      },
+      "to": {
+        "node": "summary",
+        "port": "main"
+      }
+    }
+  ],
+  "settings": {
+    "maxIterations": 100
+  }
+}

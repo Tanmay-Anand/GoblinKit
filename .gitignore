@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Run output. A journal holds whatever flowed through the workflow, which on a
+# real one is customer data — it does not belong in the repository.
+*.journal.json
+.scratch/
