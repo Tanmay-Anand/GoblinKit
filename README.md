@@ -1,6 +1,11 @@
 <div align="center">
 
-# 🧌 GoblinKit
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/goblinkit-mark-solid.png">
+  <img src="assets/logo/goblinkit-mark.png" alt="GoblinKit logo: a goblin head folded from paper" width="240">
+</picture>
+
+# GoblinKit
 
 **A node-based workflow automation platform — and the reusable kit underneath it.**
 

@@ -6,3 +6,6 @@ dist/
 # real one is customer data — it does not belong in the repository.
 *.journal.json
 .scratch/
+
+# Private working notes, kept locally and never pushed.
+internal-docs/

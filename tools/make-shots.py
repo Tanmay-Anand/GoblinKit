@@ -8,8 +8,10 @@ no network and no fonts to download.
 Every character in FRAMES below is the verbatim output of the command above
 it, run against `examples/order-triage.json`. A capture that shows something
 the program does not print is a lie with a nicer font, so when the CLI's
-output changes, re-run this rather than editing the picture.
+output changes, re-run this rather than editing the picture. The logo in the
+title bar is window chrome, like a terminal tab's icon, not program output.
 
+    python tools/make-logos.py    # once, if assets/logo/goblinkit-mark.png is missing
     python tools/make-shots.py
 """
 
@@ -38,6 +40,13 @@ symbol = ImageFont.truetype(str(FONT_DIR / "seguisym.ttf"), 25)
 SYMBOL_CHARS = "↻⟳⏲"
 
 LINE_H = 38
+
+# The transparent mark, not the solid one: on the dark title bar a white tile
+# would be the brightest thing in the frame, while the transparent mark's pale
+# fills read as the goblin and its dark outlines simply recede.
+LOGO = Image.open(Path(__file__).resolve().parent.parent / "assets" / "logo" / "goblinkit-mark.png").convert("RGBA")
+LOGO_H = 34
+LOGO = LOGO.resize((round(LOGO.width * LOGO_H / LOGO.height), LOGO_H), Image.LANCZOS)
 
 
 def S(text, colour=FG, strong=False):
@@ -77,7 +86,8 @@ def render(lines, title, out):
     for i in range(3):
         cx = left + 26 + i * 26
         d.ellipse([cx, top + 23, cx + 13, top + 36], fill="#34363d")
-    d.text((left + 118, top + 21), title, font=small, fill=DIM)
+    img.paste(LOGO, (left + 114, top + 30 - LOGO_H // 2), LOGO)
+    d.text((left + 114 + LOGO.width + 12, top + 21), title, font=small, fill=DIM)
 
     y = top + pad_top
     for segments in lines:
