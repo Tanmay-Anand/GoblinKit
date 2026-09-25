@@ -29,6 +29,21 @@ export const manualTrigger = defineManifest({
   executionMode: 'batch',
   trigger: true,
   ports: { inputs: [], outputs: [{ id: 'main' }] },
+  config: {
+    fields: [
+      {
+        // Read by whoever starts the run (the canvas's Run button, the API), not
+        // by the executor: a run's input is decided before the first box runs.
+        // Keeping it on the trigger means the sample data lives in the document,
+        // next to the workflow it was written for.
+        name: 'testInput',
+        type: 'json',
+        label: 'Test input',
+        description: 'The data a run starts with when you press Run. An array starts one item per element.',
+        default: {},
+      },
+    ],
+  },
 });
 
 const manualTriggerNode = defineExecutor(manualTrigger, (ctx) => ctx.emit('main', [...ctx.items]));
@@ -85,7 +100,7 @@ export const ifManifest = defineManifest({
     outputs: [{ id: 'true' }, { id: 'false' }],
   },
   config: {
-    fields: [{ name: 'condition', type: 'expression', required: true, label: 'Condition' }],
+    fields: [{ name: 'condition', type: 'expression', required: true, label: 'Condition', description: 'Items where this is true go down the true wire, e.g. {{ $json.total > 100 }}.' }],
   },
 });
 
@@ -133,7 +148,7 @@ export const switchManifest = defineManifest({
     outputs: [{ id: '0' }, { id: '1' }, { id: '2' }, { id: '3' }, { id: 'fallback' }],
   },
   config: {
-    fields: [{ name: 'cases', type: 'json', label: 'Cases', description: 'Array of condition expressions', default: [] }],
+    fields: [{ name: 'cases', type: 'json', label: 'Cases', description: 'A list of up to 4 conditions. Each item goes down the first case it matches, or down fallback if none do.', default: [] }],
   },
 });
 
@@ -198,11 +213,17 @@ export const httpManifest = defineManifest({
   },
   config: {
     fields: [
-      { name: 'method', type: 'select', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], default: 'GET' },
-      { name: 'url', type: 'expression', required: true },
-      { name: 'headers', type: 'json', default: {} },
-      { name: 'body', type: 'json' },
-      { name: 'timeoutMs', type: 'number', default: 30_000 },
+      { name: 'method', label: 'Method', type: 'select', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], default: 'GET' },
+      {
+        name: 'url',
+        label: 'URL',
+        type: 'expression',
+        required: true,
+        description: 'The address to call. Use {{ $json.field }} to build it from the incoming item.',
+      },
+      { name: 'headers', label: 'Headers', type: 'json', default: {}, description: 'An object of header name → value.' },
+      { name: 'body', label: 'Body', type: 'json', description: 'Sent as JSON. Ignored for GET.' },
+      { name: 'timeoutMs', label: 'Give up after (ms)', type: 'number', default: 30_000 },
     ],
   },
   defaults: { policy: { retry: { maxAttempts: 3, backoffMs: 500, maxBackoffMs: 30_000 } } },
@@ -232,18 +253,23 @@ const httpNode = defineExecutor(httpManifest, async (ctx) => {
     ctx.signal.addEventListener('abort', () => controller.abort(), { once: true });
 
     try {
-      const res = await fetch(url, {
-        method: cfg.method ?? 'GET',
-        headers: {
-          'content-type': 'application/json',
-          // Forwarded so a retried step is recognised as the same step by any
-          // provider that honours it.
-          'idempotency-key': ctx.idempotencyKey,
-          ...(cfg.headers ?? {}),
-        },
-        ...(cfg.body !== undefined && cfg.method !== 'GET' ? { body: JSON.stringify(cfg.body) } : {}),
-        signal: controller.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: cfg.method ?? 'GET',
+          headers: {
+            'content-type': 'application/json',
+            // Forwarded so a retried step is recognised as the same step by any
+            // provider that honours it.
+            'idempotency-key': ctx.idempotencyKey,
+            ...(cfg.headers ?? {}),
+          },
+          ...(cfg.body !== undefined && cfg.method !== 'GET' ? { body: JSON.stringify(cfg.body) } : {}),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        throw networkFailure(error, url, cfg.timeoutMs ?? 30_000, controller.signal.aborted && !ctx.signal.aborted);
+      }
 
       const text = await res.text();
       let data: JsonValue;
@@ -275,6 +301,54 @@ const httpNode = defineExecutor(httpManifest, async (ctx) => {
   return ctx.emit('main', out);
 });
 
+/**
+ * Say why a request never got an answer.
+ *
+ * Node's fetch reports every network problem as "fetch failed" and hides the
+ * reason in `cause`. That sentence is useless on a box marked red, so the
+ * common causes are named, with the host, in words a person can act on.
+ */
+function networkFailure(error: unknown, url: string, timeoutMs: number, timedOut: boolean): NodeFailure {
+  let host = url;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return new NodeFailure(`"${url}" is not a valid address.`, { code: 'BAD_URL', retryable: false });
+  }
+  if (timedOut) return new NodeFailure(`${host} did not answer within ${timeoutMs / 1000} s.`, { code: 'TIMEOUT', retryable: true });
+
+  const reason = (error as { cause?: { code?: string; message?: string } } | null)?.cause;
+  // fetch refuses a short list of ports outright (SMTP, IRC, …) for safety.
+  if (reason?.message === 'bad port') {
+    return new NodeFailure(`${host} uses a port that web requests are not allowed to use. Pick another port.`, {
+      code: 'BAD_PORT',
+      retryable: false,
+    });
+  }
+  const cause = reason?.code;
+  switch (cause) {
+    case 'ECONNREFUSED':
+      return new NodeFailure(`Could not connect to ${host}: nothing is listening there.`, { code: cause, retryable: true });
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return new NodeFailure(`No such host: ${host}. Check the address.`, { code: cause, retryable: cause === 'EAI_AGAIN' });
+    case 'ECONNRESET':
+      return new NodeFailure(`${host} closed the connection before answering.`, { code: cause, retryable: true });
+    case 'ETIMEDOUT':
+    case 'UND_ERR_CONNECT_TIMEOUT':
+      return new NodeFailure(`Could not reach ${host} in time.`, { code: cause, retryable: true });
+    case 'CERT_HAS_EXPIRED':
+    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+    case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
+      return new NodeFailure(`${host} has a certificate this machine does not trust.`, { code: cause, retryable: false });
+    default:
+      return new NodeFailure(`The request to ${host} failed: ${error instanceof Error ? error.message : String(error)}.`, {
+        code: cause ?? 'NETWORK',
+        retryable: true,
+      });
+  }
+}
+
 /* --------------------------------------------------------------------- log */
 
 export const logManifest = defineManifest({
@@ -288,7 +362,7 @@ export const logManifest = defineManifest({
     inputs: [{ id: 'main', required: true, join: 'all' }],
     outputs: [{ id: 'main' }],
   },
-  config: { fields: [{ name: 'message', type: 'expression' }] },
+  config: { fields: [{ name: 'message', label: 'Message', type: 'expression', description: 'What to record, e.g. {{ $json.name }}. Leave empty to record the item count.' }] },
 });
 
 const logNode = defineExecutor(logManifest, (ctx) => {
@@ -315,10 +389,11 @@ export const forEachManifest = defineManifest({
     fields: [
       {
         name: 'items',
+        label: 'Loop over',
         type: 'expression',
         description: 'Collection to walk, e.g. {{ $json.lines }}. Defaults to the input items.',
       },
-      { name: 'maxIterations', type: 'number', default: 1000 },
+      { name: 'maxIterations', label: 'Stop after (passes)', type: 'number', default: 1000 },
     ],
   },
 });
@@ -337,8 +412,8 @@ export const whileManifest = defineManifest({
   },
   config: {
     fields: [
-      { name: 'condition', type: 'expression', required: true, description: 'Evaluated with $loop.iteration and $loop.last' },
-      { name: 'maxIterations', type: 'number', default: 1000 },
+      { name: 'condition', label: 'Keep going while', type: 'expression', required: true, description: 'Checked before each pass. $loop.iteration counts passes; $loop.last is the previous result.' },
+      { name: 'maxIterations', label: 'Stop after (passes)', type: 'number', default: 1000 },
     ],
   },
 });
@@ -368,7 +443,7 @@ export const waitManifest = defineManifest({
     inputs: [{ id: 'main', required: true, join: 'all' }],
     outputs: [{ id: 'main' }],
   },
-  config: { fields: [{ name: 'ms', type: 'number', required: true, default: 1000 }] },
+  config: { fields: [{ name: 'ms', label: 'Wait for (ms)', type: 'number', required: true, default: 1000 }] },
 });
 
 /* ------------------------------------------------------------------ exports */

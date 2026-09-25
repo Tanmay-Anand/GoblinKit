@@ -18,15 +18,39 @@ durably, observably, and at multi-tenant scale.
 
 ---
 
-## v1 — what runs today
+## What runs today
 
-Stage 1 of the [build order](#build-order) plus the core of Stage 2: **the kit's spine**.
-A real graph — with branching, loops, retries, skips, waits and merges — executes with
-no database, no queue and no UI.
+Stages 1–3 of the [build order](#build-order): the engine, the first ten boxes, and
+**the canvas** — start the app, pick boxes, connect them, press Run.
 
 ```bash
 pnpm install
-pnpm test                                    # 46 tests
+pnpm dev          # then open http://127.0.0.1:5173
+```
+
+<p align="center">
+  <img src="assets/goblinkit-canvas.webp" alt="The GoblinKit canvas: the order-triage workflow drawn top to bottom — a trigger, an If whose true and false wires are green and orange, a merge, and a For each loop — with the Run button top right and a minimap bottom right." width="760">
+</p>
+
+- **Add boxes** from the `+` under any box (it lands below and is wired up for you), or
+  open the box list and drag one onto the canvas.
+- **Connect** by dragging from a dot at the bottom of one box to a dot at the top of
+  another. A wire that cannot work is refused with the reason.
+- **Set a box up** by clicking it. The settings panel is built from the box's manifest;
+  anything missing is marked in red on the box, before you run.
+- **Run** streams the run onto the canvas as it happens: each box shows running, done,
+  skipped or failed, and each wire how many items it carried. Click a box for the exact
+  input and output it saw; open **Runs** for the history.
+
+Everything is local: one user, no login, workflows and runs saved as JSON in
+`workspace/`. The server behind the canvas listens on `127.0.0.1` only and refuses
+requests from other websites. The first start seeds the order-triage example.
+
+The engine also runs without the canvas:
+
+```bash
+pnpm test                                    # 75 unit and integration tests
+pnpm test:e2e                                # 15 browser tests of the canvas, see e2e/README.md
 pnpm goblin run examples/order-triage.json --input '{"total":250,"lines":[{"sku":"A","qty":2,"price":30}]}'
 ```
 
@@ -56,12 +80,17 @@ always derived:
 | `defineManifest` / `defineExecutor`, executor context, test harness | `node-sdk` |
 | Manual trigger, Set, If, Switch, Merge, HTTP Request, Log, ForEach, While, Wait | `nodes-core` |
 | Single-process driver: clock, executors, timers | `drivers-inprocess` |
+| Golden-file run traces, the node-pack contract every pack must pass | `testing` |
+| Commands + undo, connection rules, live run view, the React Flow canvas and panels | `editor` |
+| Local server: workspace files behind storage ports, runs streamed over SSE | `apps/api` |
+| The app shell: workflow list, canvas screen | `apps/web` |
 | `goblin run` / `validate` / `replay` / `nodes` | `apps/cli` |
 
-**Not built yet:** persistence and the queue driver (Stage 3), the editor (Stage 4), the
-API, auth, tenancy and credentials (Stage 5). The Code node is deliberately absent until
-there is a real sandbox boundary — `node:vm` is not one, and expressions cover the
-common case without opening the host.
+**Next up: boxes that start by themselves (Stage 4)** — Schedule and Webhook, an Active
+switch per workflow, and runs that survive restarting the app. After it: power boxes
+(Stage 5), integrations (Stage 6), then production durability, accounts and scale. The
+Code node is deliberately absent until Stage 5 brings a real sandbox boundary —
+`node:vm` is not one, and expressions cover the common case without opening the host.
 
 Three v1 decisions worth knowing:
 
@@ -265,15 +294,15 @@ goblinkit/
 │   ├── persistence/          # Postgres repos · journal · blobs · outbox
 │   ├── expressions/          # {{ }} parser + evaluator (no eval)                 ← built
 │   ├── sandbox/              # CodeSandbox port · QuickJS-WASM · isolated-vm
-│   ├── editor/               # React Flow canvas · document store · schema-driven forms
-│   └── testing/              # in-memory adapters · golden-file harness · contract suite
+│   ├── editor/               # React Flow canvas · document store · schema-driven forms ← built
+│   └── testing/              # golden-file harness · contract suite · in-memory adapters ← built
 └── apps/
-    ├── web/                  # editor + console
-    ├── api/                  # HTTP API · webhook ingress · scheduler
+    ├── web/                  # the canvas: palette · boxes · connections · Run  ← built
+    ├── api/                  # HTTP API · run streaming · webhooks · scheduler   ← built, local mode
     └── worker/               # execution workers
 ```
 
-**The reuse boundary sits under `runtime`.** `spec` + `graph` + `runtime` + `node-sdk` is the kit — no database, no HTTP, no Redis, no React. A CI rule fails the build if `runtime` imports `pg`; this is enforced, not aspirational.
+**The reuse boundary sits under `runtime`.** `spec` + `graph` + `runtime` + `node-sdk` is the kit — no database, no HTTP, no Redis, no React. `runtime` imports nothing but `spec`, `graph` and `expressions`; a CI rule that fails the build if it ever imports `pg` is planned alongside CI itself, and until then the boundary holds by review.
 
 ---
 
@@ -296,19 +325,26 @@ goblinkit/
 
 ## Build order
 
-Sequenced so each stage is independently demonstrable, and the reusable core is proven before any product surface leans on it.
+**The product loop comes first:** start the app, pick boxes, connect them, press **Run**, watch it execute.
+The first product is a local web app for one user: `pnpm dev`, open `localhost`, no login,
+workflows saved as files. Production durability, accounts and scale follow once that loop works.
 
-| Stage | Deliverable |
-|---|---|
-| **1 · Spine** | `spec` + `graph` + `runtime` + in-process driver + golden-file harness. `goblin run workflow.json` executes branching, loops, retries and skips — **no DB, no queue, no UI.** |
-| **2 · Node SDK** | `defineManifest`/`defineExecutor`, `ctx`, contract suite, and `nodes-core` (triggers, HTTP, if/switch/merge, transform, code, loops, wait, sub-workflow). |
-| **3 · Durability** | Journal, snapshots, outbox, queue driver with leases + heartbeats + recovery sweeper, retention. Chaos test: kill workers mid-run, assert exactly-once. |
-| **4 · Editor** | Document store + undo, canvas with scope containers, manifest-driven palette and inspector, expression autocomplete, inline diagnostics. |
-| **5 · Platform** | API, auth, tenancy + RLS, credentials + OAuth manager, webhook ingress with idempotency, scheduler with leader election, quotas. |
-| **6 · The experience** | Run inspector with item lineage, journal scrubbing, partial execution, pinned data, replay-from-failure, error workflows, "copy as failing test case". |
-| **7 · Scale** | Per-class worker pools, dedicated sandbox pool, signed node-pack registry, history retention tiers. |
+| Stage | Deliverable | Boxes added |
+|---|---|---|
+| **1 · Spine** ✅ | `spec` + `graph` + `runtime` + in-process driver. `goblin run workflow.json` executes branching, loops, retries and skips — **no DB, no queue, no UI.** | — |
+| **2 · Node SDK** ✅ | `defineManifest`/`defineExecutor`, `ctx`, harness. | Manual, HTTP, If, Switch, Merge, Set, ForEach, While, Wait, Log |
+| **3 · Canvas** ✅ | **The first usable app.** Palette → drag boxes → connect ports → settings panel → **Run**, with each box lighting up live and its input/output one click away. Workflows and runs saved to a local workspace folder. Golden-file harness + contract suite first. | — (the ten above, on a canvas) |
+| **4 · Self-starting** | An **Active** switch per workflow, a local scheduler and webhook URL. Journals written to disk as they happen, so runs (and a three-day Wait) survive a restart. | Schedule, Webhook |
+| **5 · Power boxes** | Real sandbox (QuickJS-WASM), expression autocomplete from real data, pinned data, re-run from a failed box, journal scrubbing. | Code, Sub-workflow, AI step |
+| **6 · Integrations** | Local encrypted credentials, OAuth sign-in. Each integration is its own node pack. | Slack, Email, Google Sheets |
+| **7 · Durability** | Postgres behind the same storage ports, queue driver with leases + heartbeats + recovery sweeper. Chaos test: kill workers mid-run, assert exactly-once. | — |
+| **8 · Platform** | Accounts, auth, tenancy + RLS, envelope-encrypted credentials, hosted webhooks, leader-elected scheduler, quotas. | — |
+| **9 · Scale** | Per-class worker pools, dedicated sandbox pool, signed node-pack registry, history retention tiers. | — |
 
-Stages 1–3 are the kit. **A second product built on GoblinKit starts at Stage 4** with different nodes and different chrome.
+Stages 3–6 are the single-user product; 7–9 are for when it's more than one person on one
+machine. The kit (`spec` + `graph` + `runtime` + `node-sdk` + drivers) is unchanged by this
+order, and `editor` is reusable on top of it. Why the canvas now comes before durability:
+[ADR-016](ARCHITECTURE.md#18-decision-records).
 
 Full detail: [ARCHITECTURE.md §19](ARCHITECTURE.md#19-build-order).
 
@@ -331,7 +367,7 @@ A change that breaks one of these needs an ADR ([ARCHITECTURE.md §18](ARCHITECT
 
 ## Status
 
-Design complete; implementation not started. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
+Stages 1–3 built: the canvas runs. Stage 4, self-starting workflows, is next. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
 
 ## License
 

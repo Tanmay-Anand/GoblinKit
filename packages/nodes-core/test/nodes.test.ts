@@ -1,9 +1,12 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 
-import { runNode } from '@goblin/node-sdk';
+import { NodeFailure, runNode } from '@goblin/node-sdk';
 import { MapRegistry, type WorkflowDocument } from '@goblin/spec';
 import { runWorkflow } from '@goblin/drivers-inprocess';
 import { coreManifests, coreNodes } from '@goblin/nodes-core';
+import { checkNodePack } from '@goblin/testing';
 
 const registry = new MapRegistry(coreManifests);
 const byType = (type: string) => coreNodes.find((n) => n.manifest.type === type)!;
@@ -14,36 +17,33 @@ describe('node pack contract', () => {
    * editor cannot render it and the engine cannot schedule it. Testing them
    * once here is what makes a third-party pack trustworthy without reading it.
    */
-  it('every manifest is renderable and schedulable', () => {
-    for (const manifest of coreManifests) {
-      // Dotted namespace, camelCase segments allowed: "core.scope.forEach".
-      expect(manifest.type).toMatch(/^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)+$/);
-      expect(manifest.version).toBeGreaterThanOrEqual(1);
-      expect(manifest.title.length).toBeGreaterThan(0);
-
-      // Inputs and outputs are separate namespaces — a node may legitimately
-      // have an input and an output both called 'main' — so each list is
-      // checked on its own.
-      for (const list of [manifest.ports.inputs, manifest.ports.outputs]) {
-        const ids = list.map((p) => p.id);
-        expect(new Set(ids).size).toBe(ids.length);
-      }
-
-      // A trigger takes no input; anything else with no inputs could never run.
-      if (manifest.trigger) expect(manifest.ports.inputs).toHaveLength(0);
-      else expect(manifest.ports.inputs.length).toBeGreaterThan(0);
-
-      // A manifest must be plain data: it is served to a browser as JSON.
-      expect(() => JSON.parse(JSON.stringify(manifest))).not.toThrow();
-    }
+  it('passes the shared contract every node pack must pass', () => {
+    const problems = checkNodePack({
+      manifests: coreManifests,
+      nodes: coreNodes,
+      engineImplemented: ['core.scope.forEach', 'core.scope.while', 'core.scope.end', 'core.wait'],
+    });
+    expect(problems).toEqual([]);
   });
 
-  it('ships an executor for every node the engine does not implement itself', () => {
-    const engineImplemented = new Set(['core.scope.forEach', 'core.scope.while', 'core.scope.end', 'core.wait']);
-    for (const manifest of coreManifests) {
-      const hasExecutor = coreNodes.some((n) => n.manifest.type === manifest.type);
-      expect(hasExecutor).toBe(!engineImplemented.has(manifest.type));
-    }
+  it('the contract catches what it claims to', () => {
+    // A check that never fails proves nothing, so break a pack on purpose.
+    const problems = checkNodePack({
+      manifests: [
+        { type: 'Bad Type', version: 0, title: '', group: 'x', executionMode: 'batch', ports: { inputs: [], outputs: [] } },
+        {
+          type: 'core.pick', version: 1, title: 'Pick', group: 'x', executionMode: 'batch',
+          ports: { inputs: [{ id: 'main' }], outputs: [{ id: 'main' }] },
+          config: { fields: [{ name: 'mode', type: 'select', options: ['a'], default: 'z' }] },
+        },
+      ],
+      nodes: [],
+    });
+    expect(problems.join('\n')).toMatch(/dotted namespace/);
+    expect(problems.join('\n')).toMatch(/needs a title/);
+    expect(problems.join('\n')).toMatch(/could never run/);
+    expect(problems.join('\n')).toMatch(/defaults to a value it does not offer/);
+    expect(problems.join('\n')).toMatch(/core\.pick@1: has no executor/);
   });
 });
 
@@ -85,6 +85,29 @@ describe('if', () => {
     // Not an empty envelope: "no items" and "this branch was not taken" are
     // different facts, and only the second should collapse what is downstream.
     expect(out['false']).toBeUndefined();
+  });
+});
+
+describe('http', () => {
+  const http = byType('core.http.request');
+
+  it('says why a request got no answer, instead of "fetch failed"', async () => {
+    // A port that was just freed: nothing is listening on it.
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as AddressInfo;
+    await new Promise((r) => server.close(r));
+
+    await expect(runNode(http, { config: { url: `http://127.0.0.1:${port}/` }, items: [{ data: {} }] })).rejects.toThrow(
+      /Could not connect to 127\.0\.0\.1:\d+: nothing is listening there/,
+    );
+  });
+
+  it('does not retry an address that can never work', async () => {
+    const failure = await runNode(http, { config: { url: 'not a url' }, items: [{ data: {} }] }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(NodeFailure);
+    expect((failure as NodeFailure).retryable).toBe(false);
+    expect((failure as NodeFailure).message).toMatch(/not a valid address/);
   });
 });
 

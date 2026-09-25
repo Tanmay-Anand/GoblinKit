@@ -68,6 +68,22 @@ describe('validateDocument', () => {
     expect(codes(doc)).toContain('MISSING_REQUIRED_INPUT');
   });
 
+  it('flags a required setting left empty, and points at the field', () => {
+    const doc = base(
+      [node('t', 'core.trigger.manual'), node('h', 'core.http.request', { url: '  ' })],
+      [edge('e1', 't', 'main', 'h')],
+    );
+    const diagnostic = validateDocument(doc, registry).find((d) => d.code === 'INVALID_CONFIG');
+    expect(diagnostic?.path).toEqual(['nodes', 1, 'config', 'url']);
+    expect(diagnostic?.message).toMatch(/URL/);
+  });
+
+  it('counts a default as filled in', () => {
+    // Wait's duration is required but defaults to 1000 ms: nothing to fix.
+    const doc = base([node('t', 'core.trigger.manual'), node('w', 'core.wait')], [edge('e1', 't', 'main', 'w')]);
+    expect(codes(doc)).not.toContain('INVALID_CONFIG');
+  });
+
   it('warns about an unreachable node rather than rejecting it', () => {
     const doc = base(
       [node('t', 'core.trigger.manual'), node('a', 'core.log'), node('orphan', 'core.log')],

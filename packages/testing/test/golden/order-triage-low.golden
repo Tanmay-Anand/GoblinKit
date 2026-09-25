@@ -1,0 +1,28 @@
+run started with 1 item(s)
+→ trigger
+✓ trigger main=1
+  e1 carried 1
+→ classify
+✓ classify true=1
+  e2 carried 1
+  e3 pruned: classify emitted nothing on port false
+→ flagHigh
+· flagNormal skipped: every required input was pruned
+  e5 pruned: flagNormal emitted nothing on port main
+✓ flagHigh main=1
+  e4 carried 1
+→ merge
+✓ merge main=1
+  e6 carried 1
+↻ eachLine opened over 1
+  e7#eachLine[0] carried 1
+→ priceLine @eachLine[0]
+✓ priceLine @eachLine[0] main=1
+  e8#eachLine[0] carried 1
+↻ eachLine pass 1
+↻ eachLine closed
+  e9 carried 1
+→ summary
+✓ summary main=1
+run succeeded
+  output {"sku":"C-9","lineTotal":40}

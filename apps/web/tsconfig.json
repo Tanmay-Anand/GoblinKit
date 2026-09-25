@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "baseUrl": "../..",
+    "paths": {
+      "@goblin/spec": ["packages/spec/src/index.ts"],
+      "@goblin/graph": ["packages/graph/src/index.ts"],
+      "@goblin/expressions": ["packages/expressions/src/index.ts"],
+      "@goblin/runtime": ["packages/runtime/src/index.ts"],
+      "@goblin/editor": ["packages/editor/src/index.ts"],
+      "@goblin/api/protocol": ["apps/api/src/protocol.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../packages/editor/src/**/*.ts", "../../packages/editor/src/**/*.tsx", "vite.config.ts"],
+  "exclude": []
+}

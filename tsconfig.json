@@ -25,8 +25,13 @@
       "@goblin/runtime": ["packages/runtime/src/index.ts"],
       "@goblin/node-sdk": ["packages/node-sdk/src/index.ts"],
       "@goblin/nodes-core": ["packages/nodes-core/src/index.ts"],
-      "@goblin/drivers-inprocess": ["packages/drivers-inprocess/src/index.ts"]
+      "@goblin/drivers-inprocess": ["packages/drivers-inprocess/src/index.ts"],
+      "@goblin/testing": ["packages/testing/src/index.ts"],
+      "@goblin/api/protocol": ["apps/api/src/protocol.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "*.ts"]
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "apps/*/test/**/*.ts", "*.ts"],
+  // The editor and the web app are browser code with JSX; they are checked by
+  // apps/web/tsconfig.json, which adds the DOM and React settings they need.
+  "exclude": ["packages/editor", "apps/web"]
 }

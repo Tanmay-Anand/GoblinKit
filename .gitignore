@@ -9,3 +9,13 @@ dist/
 
 # Private working notes, kept locally and never pushed.
 internal-docs/
+
+# The local app's workspace: your saved workflows and their run journals.
+workspace/
+
+# Playwright: reports, traces, and the throwaway workspace the e2e servers use.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/.workspace/

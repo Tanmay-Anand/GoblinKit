@@ -14,6 +14,8 @@ export default defineConfig({
       '@goblin/node-sdk': pkg('node-sdk'),
       '@goblin/nodes-core': pkg('nodes-core'),
       '@goblin/drivers-inprocess': pkg('drivers-inprocess'),
+      '@goblin/testing': pkg('testing'),
+      '@goblin/api/protocol': fileURLToPath(new URL('./apps/api/src/protocol.ts', import.meta.url)),
     },
   },
   test: { include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'] },

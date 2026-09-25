@@ -170,7 +170,33 @@ export function validateDocument(
           severity: 'error',
           code: 'MISSING_REQUIRED_INPUT',
           path: ['nodes', index],
-          message: `${node.label ?? node.id} needs an input on port ${port.id} and has none.`,
+          // Written for the person on the canvas, who sees wires, not ports.
+          message:
+            port.id === 'main'
+              ? `${node.label ?? node.id} has nothing wired into it yet.`
+              : `${node.label ?? node.id} needs a wire into its "${port.id}" input.`,
+        });
+      }
+    }
+  });
+
+  // --- required settings are filled in -----------------------------------
+  //
+  // Caught here rather than when the box runs, so an HTTP box with no address
+  // is marked on the canvas the moment it is added, not discovered halfway
+  // through a run after earlier boxes have already done their work.
+  doc.nodes.forEach((node, index) => {
+    const manifest = nodeById.get(node.id)?.manifest;
+    if (!manifest || node.disabled) return;
+    for (const field of manifest.config?.fields ?? []) {
+      if (!field.required) continue;
+      const value = node.config[field.name] ?? field.default;
+      if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+        out.push({
+          severity: 'error',
+          code: 'INVALID_CONFIG',
+          path: ['nodes', index, 'config', field.name],
+          message: `${node.label ?? node.id} needs its ${field.label ?? field.name} filled in.`,
         });
       }
     }
