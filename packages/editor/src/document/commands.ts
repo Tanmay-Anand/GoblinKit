@@ -10,6 +10,8 @@
 
 import type { Edge, NodeInstance, WorkflowDocument, XY } from '@goblin/spec';
 
+import { rotationOf, turn } from '../rotation.js';
+
 /** Fields a patch may change. Setting one to undefined removes it. */
 export type NodePatch = { [K in 'label' | 'config' | 'policy' | 'ui' | 'disabled']?: NodeInstance[K] | undefined };
 
@@ -21,6 +23,8 @@ export type DocumentCommand =
   | { kind: 'MoveNodes'; moves: { id: string; to: XY }[] }
   | { kind: 'Connect'; edge: Edge }
   | { kind: 'UpdateNode'; nodeId: string; patch: NodePatch }
+  /** Turn boxes a quarter clockwise (90) or anticlockwise (-90), as one step. */
+  | { kind: 'RotateNodes'; nodeIds: string[]; by: 90 | -90 }
   | { kind: 'RenameWorkflow'; name: string };
 
 export function applyCommand(doc: WorkflowDocument, cmd: DocumentCommand): WorkflowDocument {
@@ -57,6 +61,20 @@ export function applyCommand(doc: WorkflowDocument, cmd: DocumentCommand): Workf
         ...doc,
         nodes: doc.nodes.map((n) => (n.id === cmd.nodeId ? withPatch(n, cmd.patch) : n)),
       };
+
+    case 'RotateNodes': {
+      const ids = new Set(cmd.nodeIds);
+      return {
+        ...doc,
+        nodes: doc.nodes.map((n) => {
+          if (!ids.has(n.id)) return n;
+          const rotation = turn(rotationOf(n), cmd.by);
+          // 0 is the default, so it is dropped rather than stored.
+          const { rotation: _old, ...ui } = n.ui ?? {};
+          return { ...n, ui: rotation === 0 ? ui : { ...ui, rotation } };
+        }),
+      };
+    }
 
     case 'RenameWorkflow':
       return { ...doc, name: cmd.name };

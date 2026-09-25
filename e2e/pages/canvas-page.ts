@@ -80,6 +80,10 @@ export class CanvasPage {
    * after the pointer travels, and a single jump to the target is not a drag.
    */
   async connect(from: string, to: string, options: { output?: string; input?: string } = {}): Promise<void> {
+    // Fit the flow on screen first, as a person scrolls the target into view.
+    // A dot near the edge of the canvas makes React Flow pan while the wire
+    // is dragged, which slides the target out from under the pointer.
+    await this.page.getByRole('button', { name: 'Fit View' }).click();
     const source = this.box(from).getByLabel(options.output ? `Output: ${options.output}` : 'Output', { exact: true });
     const target = this.box(to).getByLabel(options.input ? `Input: ${options.input}` : 'Input', { exact: true });
     const [a, b] = [await centre(source), await centre(target)];
@@ -106,6 +110,51 @@ export class CanvasPage {
 
   async closePanel(): Promise<void> {
     await this.page.getByRole('complementary').getByRole('button', { name: 'Close' }).click();
+  }
+
+  // --- right-click menus -------------------------------------------------
+
+  get menu(): Locator {
+    return this.page.getByRole('menu');
+  }
+
+  menuItem(name: string | RegExp): Locator {
+    return this.menu.getByRole('menuitem', { name });
+  }
+
+  /** Right-click empty canvas, `at` pixels from the canvas's top-left corner. */
+  async rightClickCanvas(at: { x: number; y: number } = { x: 60, y: 60 }): Promise<void> {
+    await this.pane.click({ button: 'right', position: at });
+    await expect(this.menu).toBeVisible();
+  }
+
+  async rightClickBox(name: string): Promise<void> {
+    await this.box(name).getByText(name, { exact: true }).first().click({ button: 'right' });
+    await expect(this.menu).toBeVisible();
+  }
+
+  /**
+   * Right-click a wire halfway along. Wires are thin SVG paths with no box of
+   * their own to aim at, so this aims between the two dots the wire joins.
+   */
+  async rightClickWire(from: string, to: string): Promise<void> {
+    const a = await centre(this.box(from).getByLabel('Output', { exact: true }));
+    const b = await centre(this.box(to).getByLabel('Input', { exact: true }));
+    await this.page.mouse.click((a.x + b.x) / 2, (a.y + b.y) / 2, { button: 'right' });
+    await expect(this.menu).toBeVisible();
+  }
+
+  /** Which edge of its box a dot sits on: how a turned box is told apart. */
+  async sideOf(boxName: string, dot: 'Input' | 'Output'): Promise<'top' | 'right' | 'bottom' | 'left'> {
+    const box = (await this.box(boxName).boundingBox())!;
+    const { x, y } = await centre(this.box(boxName).getByLabel(dot, { exact: true }));
+    const gaps = {
+      top: Math.abs(y - box.y),
+      bottom: Math.abs(y - (box.y + box.height)),
+      left: Math.abs(x - box.x),
+      right: Math.abs(x - (box.x + box.width)),
+    };
+    return (Object.entries(gaps) as [keyof typeof gaps, number][]).sort((p, q) => p[1] - q[1])[0]![0];
   }
 
   async run(): Promise<void> {

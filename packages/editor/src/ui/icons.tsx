@@ -32,11 +32,15 @@ const PATHS: Record<Glyph | UiIcon, string> = {
   spinner: 'M12 3a9 9 0 1 1-9 9',
   dash: 'M5 12h14',
   keyboard: 'M3 6h18v12H3z M7 10h.5 M11 10h.5 M15 10h.5 M8 14h8',
+  rotateRight: 'M20 11a8 8 0 1 0-2.3 5.7 M20 4v7h-7',
+  rotateLeft: 'M4 11a8 8 0 1 1 2.3 5.7 M4 4v7h7',
+  fit: 'M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5',
+  settings: 'M4 7h10 M18 7h2 M4 17h4 M12 17h8 M14 5v4 M8 15v4',
 };
 
 export type UiIcon =
   | 'back' | 'chevronDown' | 'chevronUp' | 'plus' | 'undo' | 'redo' | 'x' | 'search' | 'grid' | 'layout'
-  | 'alert' | 'check' | 'trash' | 'spinner' | 'dash' | 'keyboard';
+  | 'alert' | 'check' | 'trash' | 'spinner' | 'dash' | 'keyboard' | 'rotateRight' | 'rotateLeft' | 'fit' | 'settings';
 
 export function Icon({ name, size = 16, className }: { name: Glyph | UiIcon; size?: number; className?: string }) {
   const filled = name === 'play';

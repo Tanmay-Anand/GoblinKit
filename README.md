@@ -34,8 +34,13 @@ pnpm dev          # then open http://127.0.0.1:5173
 
 - **Add boxes** from the `+` under any box (it lands below and is wired up for you), or
   open the box list and drag one onto the canvas.
-- **Connect** by dragging from a dot at the bottom of one box to a dot at the top of
-  another. A wire that cannot work is refused with the reason.
+- **Connect** by dragging from one box's output dot (the bottom, unless it is turned) to
+  another's input dot. A wire that cannot work is refused with the reason.
+- **Right-click** empty canvas to add a box right there, tidy up, or fit the flow to the
+  screen; right-click a box to rotate, open, grow or delete it, or a wire to delete it.
+- **Rotate a box** 90° either way (`R`, `Shift+R`, or its settings) to change which sides
+  its wires attach to — turn a flow to run left to right, say. The card and its text stay
+  upright; boxes grown from a turned box face the same way, and Tidy up follows.
 - **Set a box up** by clicking it. The settings panel is built from the box's manifest;
   anything missing is marked in red on the box, before you run.
 - **Run** streams the run onto the canvas as it happens: each box shows running, done,
@@ -49,8 +54,8 @@ requests from other websites. The first start seeds the order-triage example.
 The engine also runs without the canvas:
 
 ```bash
-pnpm test                                    # 75 unit and integration tests
-pnpm test:e2e                                # 15 browser tests of the canvas, see e2e/README.md
+pnpm test                                    # 79 unit and integration tests
+pnpm test:e2e                                # 23 browser tests of the canvas, see e2e/README.md
 pnpm goblin run examples/order-triage.json --input '{"total":250,"lines":[{"sku":"A","qty":2,"price":30}]}'
 ```
 

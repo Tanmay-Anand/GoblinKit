@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 
-import type { ConfigField, Envelope, JsonValue, NodePolicy, OnErrorBehaviour } from '@goblin/spec';
+import type { ConfigField, Envelope, JsonValue, NodeInstance, NodePolicy, OnErrorBehaviour } from '@goblin/spec';
 
 import type { NodePatch } from '../document/commands.js';
 import { describeType, portLabel } from '../describe.js';
+import { rotationOf, SIDE_LABEL, sidesFor } from '../rotation.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
@@ -93,6 +94,21 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
               <Field key={field.name} nodeId={nodeId} field={field} value={node.config[field.name]} onChange={(v) => setConfig(field.name, v)} />
             ))}
             {!manifest?.config?.fields?.length ? <p className="gk-help">This box has nothing to set up.</p> : null}
+
+            <div className="gk-field">
+              <span className="gk-field-label" id={`gk-facing-${nodeId}`}>
+                Faces
+              </span>
+              <div className="gk-inline" role="group" aria-labelledby={`gk-facing-${nodeId}`}>
+                <button type="button" className="gk-btn-outline gk-btn-icon" onClick={() => store.getState().rotate(-90, [nodeId])} aria-label="Rotate left" title="Rotate left (Shift+R)">
+                  <Icon name="rotateLeft" size={15} />
+                </button>
+                <button type="button" className="gk-btn-outline gk-btn-icon" onClick={() => store.getState().rotate(90, [nodeId])} aria-label="Rotate right" title="Rotate right (R)">
+                  <Icon name="rotateRight" size={15} />
+                </button>
+                <span className="gk-muted">{facing(node)}</span>
+              </div>
+            </div>
 
             {manifest && !manifest.trigger && !manifest.scope && node.type !== 'core.wait' ? (
               <fieldset className="gk-fieldset">
@@ -325,6 +341,12 @@ function DataView({
       ))}
     </div>
   );
+}
+
+/** "In at the top, out at the bottom" — which way the box faces, in words. */
+function facing(node: NodeInstance): string {
+  const { input, output } = sidesFor(rotationOf(node));
+  return `In at ${SIDE_LABEL[input]}, out at ${SIDE_LABEL[output]}`;
 }
 
 function humanize(name: string): string {

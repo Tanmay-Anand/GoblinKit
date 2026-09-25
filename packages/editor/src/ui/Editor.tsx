@@ -110,7 +110,7 @@ function FloatingPanel() {
   if (!panel) return null;
   switch (panel.kind) {
     case 'add':
-      return <AddPanel {...(panel.from ? { from: panel.from } : {})} />;
+      return <AddPanel {...(panel.from ? { from: panel.from } : {})} {...(panel.at ? { at: panel.at } : {})} />;
     case 'box':
       return <SettingsPanel nodeId={panel.nodeId} tab={panel.tab} />;
     case 'runs':
@@ -166,15 +166,24 @@ function Toaster() {
   );
 }
 
-/** Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl+Y, Ctrl/Cmd+S — ignored while typing in a field. */
+/**
+ * Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl+Y, Ctrl/Cmd+S; R and Shift+R turn the
+ * selected boxes. All ignored while typing in a field.
+ */
 function Shortcuts() {
   const store = useEditorStore();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
       const typing = e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]');
       const key = e.key.toLowerCase();
+      if (!mod) {
+        if (key === 'r' && !typing && !e.altKey && store.getState().selection.nodes.length) {
+          e.preventDefault();
+          store.getState().rotate(e.shiftKey ? -90 : 90);
+        }
+        return;
+      }
       if (key === 's') {
         e.preventDefault();
         void store.getState().flushSave();
