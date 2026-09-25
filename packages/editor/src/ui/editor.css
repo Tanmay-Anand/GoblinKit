@@ -249,12 +249,23 @@
   min-height: 28px;
   padding: 2px 6px 4px;
 }
-.gk-box-ports { position: absolute; inset: auto 0 5px 0; height: 14px; pointer-events: none; }
-.gk-port-name {
-  position: absolute; bottom: 0; transform: translateX(-50%);
-  font: 600 10.5px/1 var(--gk-font);
-  white-space: nowrap;
-}
+/* Port names sit inside the card along whichever side the outputs face. */
+.gk-box-ports { position: absolute; inset: 0; pointer-events: none; }
+.gk-port-name { position: absolute; font: 600 10.5px/1 var(--gk-font); white-space: nowrap; }
+.gk-ports-bottom .gk-port-name { bottom: 9px; transform: translateX(-50%); }
+.gk-ports-top .gk-port-name { top: 42px; transform: translateX(-50%); }
+.gk-ports-left .gk-port-name { left: 10px; transform: translateY(-50%); }
+.gk-ports-right .gk-port-name { right: 10px; transform: translateY(-50%); }
+/* ...and the body makes room for them, so names never sit on the text. */
+.gk-box.has-port-names.faces-top .gk-box-body { padding-top: 24px; }
+.gk-box.has-port-names.faces-left .gk-box-body,
+.gk-box.has-port-names.faces-left .gk-run-strip { margin-left: 64px; }
+.gk-box.has-port-names.faces-right .gk-box-body,
+.gk-box.has-port-names.faces-right .gk-run-strip { margin-right: 64px; }
+.gk-box.has-port-names.faces-left .gk-box-body { padding-left: 0; }
+.gk-box.has-port-names.faces-right .gk-box-body { padding-right: 0; }
+/* The + moves to the corner the port names leave free. */
+.gk-box.faces-right .gk-box-foot { justify-content: flex-start; }
 .gk-box-grow {
   position: relative;
   z-index: 1;
@@ -285,9 +296,9 @@
   border: 2px solid var(--port, #9aa1a9);
   border-radius: 50%;
 }
-.gk-editor .react-flow__handle.gk-handle-in { --port: #8e959c; top: -6px; }
-.gk-editor .react-flow__handle.gk-handle-out { bottom: -6px; }
-.gk-editor .react-flow__handle.gk-handle:hover { background: var(--port, #9aa1a9); transform: translate(-50%, 0) scale(1.25); }
+/* React Flow centres each dot on its edge, whichever edge a turn puts it on. */
+.gk-editor .react-flow__handle.gk-handle-in { --port: #8e959c; }
+.gk-editor .react-flow__handle.gk-handle:hover { background: var(--port, #9aa1a9); box-shadow: 0 0 0 3px rgba(31, 143, 214, 0.18); }
 .gk-editor .react-flow__handle.connectingto { background: var(--gk-blue); border-color: var(--gk-blue); }
 
 /* ---------------------------------------------------------------- wires */
@@ -552,3 +563,38 @@
 }
 .gk-toast-error { background: #a83535; }
 .gk-toast-success { background: #237a53; }
+
+/* ---------------------------------------------------------------- right-click menu */
+.gk-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 212px;
+  padding: 5px;
+  background: var(--gk-surface);
+  border: 1px solid var(--gk-border);
+  border-radius: 6px;
+  box-shadow: var(--gk-shadow-panel);
+}
+.gk-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.gk-menu-item:hover:not(:disabled), .gk-menu-item:focus-visible { background: var(--gk-blue-tint); outline: none; }
+.gk-menu-item:disabled { opacity: 0.45; cursor: default; }
+.gk-menu-item.is-danger { color: var(--gk-red) !important; }
+.gk-menu-item.is-danger:hover, .gk-menu-item.is-danger:focus-visible { background: var(--gk-red-tint); }
+.gk-menu-icon { width: 16px; color: var(--gk-muted); display: grid; place-items: center; }
+.gk-menu-item.is-danger .gk-menu-icon { color: inherit; }
+.gk-menu-label { flex: 1; }
+.gk-menu-key { font: 11px var(--gk-mono); color: var(--gk-faint); }
+.gk-menu-sep { height: 1px; margin: 4px 6px; background: var(--gk-border); }
+
+.gk-btn-icon { width: 32px; padding: 0; justify-content: center; }

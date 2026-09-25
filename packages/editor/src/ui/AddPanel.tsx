@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 
+import type { XY } from '@goblin/spec';
+
 import { CATEGORIES, COMING, describeType, portLabel } from '../describe.js';
 import { BOX_WIDTH } from '../layout.js';
 import { BOX_DRAG_TYPE } from './Canvas.js';
@@ -14,7 +16,7 @@ const ORDER = ['start', 'logic', 'data', 'loops', 'actions', 'timing', 'other'];
  * Click to add, or drag onto the canvas. Opened from a box's "+", it adds the
  * new box underneath and wires it up in the same step.
  */
-export function AddPanel({ from }: { from?: { node: string; port: string } }) {
+export function AddPanel({ from, at }: { from?: { node: string; port: string }; at?: XY }) {
   const store = useEditorStore();
   const manifests = useEditor((s) => s.manifests);
   const source = useEditor((s) => (from ? s.byId[from.node] : undefined));
@@ -41,6 +43,11 @@ export function AddPanel({ from }: { from?: { node: string; port: string } }) {
       store.getState().addBox(type, { from });
       return;
     }
+    if (at) {
+      // Right-clicked "Add a box here": centre the box's title bar on that spot.
+      store.getState().addBox(type, { at: { x: Math.round(at.x - BOX_WIDTH / 2), y: Math.round(at.y - 17) } });
+      return;
+    }
     // Drop it in the middle of what's on screen, not at the origin off-screen.
     const pane = document.querySelector('.gk-canvas')?.getBoundingClientRect();
     const centre = pane
@@ -59,6 +66,8 @@ export function AddPanel({ from }: { from?: { node: string; port: string } }) {
               After <strong>{source.label ?? source.id}</strong>
               {from && portLabel(source.type, from.port) ? ` · ${portLabel(source.type, from.port)}` : ''}
             </p>
+          ) : at ? (
+            <p className="gk-panel-sub">It goes where you right-clicked.</p>
           ) : (
             <p className="gk-panel-sub">Click one, or drag it onto the canvas.</p>
           )}

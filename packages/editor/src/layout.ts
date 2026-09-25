@@ -2,11 +2,14 @@ import { Graph, layout } from '@dagrejs/dagre';
 
 import type { WorkflowDocument, XY } from '@goblin/spec';
 
+import { dominantRankdir } from './rotation.js';
+
 export const BOX_WIDTH = 248;
 export const BOX_HEIGHT = 112;
 
 /**
- * Tidy the canvas: top to bottom, like the flow reads.
+ * Tidy the canvas in the direction the flow runs: top to bottom by default,
+ * or whichever way most boxes have been turned to face.
  *
  * Runs only when asked (§15.6). Layout that rearranges boxes while someone is
  * placing them fights the person, which is worse than no layout at all.
@@ -15,7 +18,7 @@ export const BOX_HEIGHT = 112;
  */
 export function tidyLayout(doc: WorkflowDocument): { id: string; to: XY }[] {
   const g = new Graph();
-  g.setGraph({ rankdir: 'TB', nodesep: 56, ranksep: 64, marginx: 0, marginy: 0 });
+  g.setGraph({ rankdir: dominantRankdir(doc), nodesep: 56, ranksep: 64, marginx: 0, marginy: 0 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of doc.nodes) {
     g.setNode(n.id, { width: BOX_WIDTH, height: n.ui?.collapsed ? 48 : BOX_HEIGHT });

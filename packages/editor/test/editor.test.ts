@@ -9,7 +9,21 @@ import { History } from '../src/document/history.js';
 import { whyNotConnect } from '../src/document/connect.js';
 import { idleProjection, projectEntries } from '../src/run/projection.js';
 import { tidyLayout } from '../src/layout.js';
-import { freeSpot } from '../src/store.js';
+import { createEditorStore, freeSpot, type EditorBackend } from '../src/store.js';
+import { dominantRankdir, sidesFor, turn } from '../src/rotation.js';
+
+/** The store needs a backend; these tests never save or run. */
+const nullBackend: EditorBackend = {
+  save: async (d) => d,
+  startRun: async () => {
+    throw new Error('not in this test');
+  },
+  follow: () => () => {},
+  listRuns: async () => [],
+  getRun: async () => {
+    throw new Error('not in this test');
+  },
+};
 
 const registry = new MapRegistry(coreManifests);
 
@@ -115,6 +129,43 @@ describe('placing a new box', () => {
     const spot = freeSpot(doc, { x: 10, y: 10 }, { x: 0, y: 150 });
     expect(spot).toEqual({ x: 10, y: 160 });
     expect(freeSpot(doc, { x: 900, y: 900 }, { x: 0, y: 150 })).toEqual({ x: 900, y: 900 });
+  });
+});
+
+describe('turning a box', () => {
+  it('moves its wires round the card, a quarter at a time, either way', () => {
+    expect(sidesFor(0)).toEqual({ input: 'top', output: 'bottom' });
+    expect(sidesFor(90)).toEqual({ input: 'right', output: 'left' });
+    expect(sidesFor(180)).toEqual({ input: 'bottom', output: 'top' });
+    expect(sidesFor(270)).toEqual({ input: 'left', output: 'right' });
+    expect(turn(270, 90)).toBe(0);
+    expect(turn(0, -90)).toBe(270);
+  });
+
+  it('turns every chosen box in one undoable step, and stores nothing for upright', () => {
+    const once = applyCommand(doc, { kind: 'RotateNodes', nodeIds: ['start', 'check'], by: 90 });
+    expect(once.nodes.map((n) => n.ui?.rotation)).toEqual([90, 90, undefined]);
+    const back = applyCommand(once, { kind: 'RotateNodes', nodeIds: ['start', 'check'], by: -90 });
+    expect(back.nodes[0]!.ui).toEqual({ position: { x: 0, y: 0 } });
+    expect(back.nodes[1]!.ui).toEqual({});
+  });
+
+  it('grows the flow in the direction a turned box faces, and the new box faces the same way', () => {
+    const turned = applyCommand(doc, { kind: 'RotateNodes', nodeIds: ['yes'], by: -90 }); // faces right
+    const store = createEditorStore({ doc: turned, manifests: coreManifests, backend: nullBackend });
+    const id = store.getState().addBox('core.log', { from: { node: 'yes', port: 'main' } })!;
+    const added = store.getState().byId[id]!;
+    expect(added.ui?.rotation).toBe(270);
+    expect(added.ui?.position?.x).toBeGreaterThan(0);
+    expect(added.ui?.position?.y).toBe(0);
+  });
+
+  it('tidies left to right when most boxes face right', () => {
+    const all = applyCommand(doc, { kind: 'RotateNodes', nodeIds: ['start', 'check', 'yes'], by: -90 });
+    expect(dominantRankdir(all)).toBe('LR');
+    const moves = new Map(tidyLayout(all).map((m) => [m.id, m.to]));
+    expect(moves.get('start')!.x).toBeLessThan(moves.get('check')!.x);
+    expect(moves.get('check')!.x).toBeLessThan(moves.get('yes')!.x);
   });
 });
 

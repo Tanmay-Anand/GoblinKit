@@ -27,6 +27,7 @@ import { History } from './document/history.js';
 import { whyNotConnect, type Wire } from './document/connect.js';
 import { idleProjection, projectEntries, type RunProjection } from './run/projection.js';
 import { BOX_HEIGHT, BOX_WIDTH, tidyLayout } from './layout.js';
+import { flowDirection, rotationOf } from './rotation.js';
 
 /** What the editor needs from the outside world. The web app implements it over HTTP. */
 export interface EditorBackend {
@@ -46,7 +47,8 @@ export class RunRefused extends Error {
 
 export type Panel =
   | null
-  | { kind: 'add'; from?: { node: string; port: string } }
+  /** `from`: grow from a box's output. `at`: drop where the canvas was right-clicked. */
+  | { kind: 'add'; from?: { node: string; port: string }; at?: XY }
   | { kind: 'box'; nodeId: string; tab: 'settings' | 'input' | 'output' }
   | { kind: 'runs' };
 
@@ -92,6 +94,8 @@ export interface EditorState {
   connect(wire: Wire): boolean;
   addBox(type: string, options?: { at?: XY; from?: { node: string; port: string } }): string | undefined;
   removeSelected(): void;
+  /** Turn boxes a quarter; with no ids, the selected ones. */
+  rotate(by: 90 | -90, nodeIds?: string[]): void;
   tidy(): void;
   runNow(): Promise<void>;
   viewRun(runId: string): Promise<void>;
@@ -232,11 +236,18 @@ export function createEditorStore(args: {
         }
 
         const from = options.from ? doc.nodes.find((n) => n.id === options.from!.node) : undefined;
+        const rotation = from ? rotationOf(from) : 0;
         let at: XY;
         if (from) {
-          // Below the box it grows from; a sibling already there pushes it right.
+          // One step on from the box it grows from, in the direction its
+          // output faces; a sibling already there pushes it sideways.
           const base = from.ui?.position ?? { x: 0, y: 0 };
-          at = freeSpot(doc, { x: base.x, y: base.y + BOX_HEIGHT + 90 }, { x: BOX_WIDTH + 40, y: 0 });
+          const d = flowDirection(rotation);
+          at = freeSpot(
+            doc,
+            { x: base.x + d.x * (BOX_WIDTH + 90), y: base.y + d.y * (BOX_HEIGHT + 90) },
+            d.y !== 0 ? { x: BOX_WIDTH + 40, y: 0 } : { x: 0, y: BOX_HEIGHT + 40 },
+          );
         } else {
           // Where it was dropped or asked for; if that is on top of a box, below it.
           at = freeSpot(doc, options.at ?? { x: 0, y: 0 }, { x: 0, y: BOX_HEIGHT + 40 });
@@ -248,7 +259,8 @@ export function createEditorStore(args: {
           typeVersion: manifest.version,
           label: manifest.title,
           config,
-          ui: { position: at },
+          // A box grown from a turned box faces the same way, so the flow keeps its direction.
+          ui: rotation ? { position: at, rotation } : { position: at },
         };
 
         const edges =
@@ -268,6 +280,11 @@ export function createEditorStore(args: {
           selection: { nodes: [], edges: [] },
           panel: panel?.kind === 'box' && selection.nodes.includes(panel.nodeId) ? null : panel,
         });
+      },
+
+      rotate(by, nodeIds) {
+        const ids = nodeIds ?? get().selection.nodes;
+        if (ids.length) get().dispatch({ kind: 'RotateNodes', nodeIds: ids, by });
       },
 
       tidy() {

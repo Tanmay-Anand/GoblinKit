@@ -14,10 +14,13 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 
+import type { XY } from '@goblin/spec';
+
 import { whyNotConnect } from '../document/connect.js';
 import { describeType } from '../describe.js';
 import { BOX_WIDTH } from '../layout.js';
 import { BoxNode, type BoxFlowNode } from './BoxNode.js';
+import { ContextMenu, type MenuEntry } from './ContextMenu.js';
 import { PortEdge, type PortFlowEdge } from './PortEdge.js';
 import { useEditor, useEditorStore } from './context.js';
 
@@ -149,6 +152,94 @@ export function Canvas() {
     [flow, store],
   );
 
+  // --- right-click menus --------------------------------------------------
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  /** Where the pointer is, relative to the canvas the menu is drawn in. */
+  const pointer = (e: React.MouseEvent | MouseEvent) => {
+    const bounds = (e.target as Element).closest('.gk-canvas')?.getBoundingClientRect();
+    return { x: e.clientX - (bounds?.left ?? 0), y: e.clientY - (bounds?.top ?? 0) };
+  };
+
+  const onPaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault();
+      setMenu({ kind: 'pane', ...pointer(e), at: flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }) });
+    },
+    [flow],
+  );
+
+  const onNodeContextMenu = useCallback(
+    (e: React.MouseEvent, node: BoxFlowNode) => {
+      e.preventDefault();
+      // Right-clicking a box outside the selection acts on that box alone,
+      // as in every file manager; inside the selection, on all of it.
+      const { selection } = store.getState();
+      const ids = selection.nodes.includes(node.id) ? selection.nodes : [node.id];
+      if (ids !== selection.nodes) store.getState().select({ nodes: ids, edges: [] });
+      setMenu({ kind: 'box', ...pointer(e), ids });
+    },
+    [store],
+  );
+
+  const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: PortFlowEdge) => {
+    e.preventDefault();
+    setMenu({ kind: 'wire', ...pointer(e), id: edge.id });
+  }, []);
+
+  const menuEntries = (m: Menu): MenuEntry[] => {
+    const s = store.getState();
+    switch (m.kind) {
+      case 'pane':
+        return [
+          { label: 'Add a box here', icon: 'plus', onSelect: () => s.openPanel({ kind: 'add', at: m.at }) },
+          { label: 'Tidy up', icon: 'layout', onSelect: () => s.tidy() },
+          { label: 'Fit to screen', icon: 'fit', onSelect: () => void flow.fitView({ padding: 0.3, maxZoom: 1, duration: 200 }) },
+        ];
+      case 'box': {
+        const many = m.ids.length > 1;
+        const what = many ? `${m.ids.length} boxes` : 'box';
+        const node = s.byId[m.ids[0]!];
+        const manifest = node ? s.registry.get(node.type, node.typeVersion) : undefined;
+        const firstOut = manifest?.ports.outputs[0]?.id;
+        const entries: MenuEntry[] = [
+          { label: `Rotate ${many ? `${what} ` : ''}right`, icon: 'rotateRight', shortcut: 'R', onSelect: () => s.rotate(90, m.ids) },
+          { label: `Rotate ${many ? `${what} ` : ''}left`, icon: 'rotateLeft', shortcut: 'Shift+R', onSelect: () => s.rotate(-90, m.ids) },
+          'separator',
+        ];
+        if (!many && node) {
+          entries.push({ label: 'Open settings', icon: 'settings', onSelect: () => s.openPanel({ kind: 'box', nodeId: node.id, tab: 'settings' }) });
+          if (firstOut) {
+            entries.push({ label: 'Add a box after', icon: 'plus', onSelect: () => s.openPanel({ kind: 'add', from: { node: node.id, port: firstOut } }) });
+          }
+          entries.push('separator');
+        }
+        entries.push({
+          label: `Delete ${what}`,
+          icon: 'trash',
+          shortcut: 'Del',
+          danger: true,
+          onSelect: () => {
+            s.select({ nodes: m.ids, edges: [] });
+            s.removeSelected();
+          },
+        });
+        return entries;
+      }
+      case 'wire':
+        return [
+          {
+            label: 'Delete wire',
+            icon: 'trash',
+            shortcut: 'Del',
+            danger: true,
+            onSelect: () => s.dispatch({ kind: 'RemoveElements', nodeIds: [], edgeIds: [m.id] }),
+          },
+        ];
+    }
+  };
+
   const minimapColour = useCallback(
     (n: BoxFlowNode) => {
       const node = store.getState().byId[n.id];
@@ -159,7 +250,12 @@ export function Canvas() {
   );
 
   return (
+    <>
     <ReactFlow<BoxFlowNode, PortFlowEdge>
+      onPaneContextMenu={onPaneContextMenu}
+      onNodeContextMenu={onNodeContextMenu}
+      onEdgeContextMenu={onEdgeContextMenu}
+      onMoveStart={closeMenu}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -210,5 +306,20 @@ export function Canvas() {
       />
       <Controls position="bottom-right" showInteractive={false} className="gk-controls" />
     </ReactFlow>
+    {menu ? (
+      <ContextMenu
+        x={menu.x}
+        y={menu.y}
+        label={menu.kind === 'pane' ? 'Canvas' : menu.kind === 'box' ? 'Box' : 'Wire'}
+        entries={menuEntries(menu)}
+        onClose={closeMenu}
+      />
+    ) : null}
+    </>
   );
 }
+
+type Menu =
+  | { kind: 'pane'; x: number; y: number; at: XY }
+  | { kind: 'box'; x: number; y: number; ids: string[] }
+  | { kind: 'wire'; x: number; y: number; id: string };

@@ -1,17 +1,42 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 
+import type { PortSpec } from '@goblin/spec';
+
 import { describeType, portHue, portLabel, summarize } from '../describe.js';
+import { rotationOf, sidesFor, type Side } from '../rotation.js';
 import type { BoxRunView } from '../run/projection.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
 export type BoxFlowNode = Node<Record<string, never>, 'box'>;
 
+const POSITION: Record<Side, Position> = {
+  top: Position.Top,
+  right: Position.Right,
+  bottom: Position.Bottom,
+  left: Position.Left,
+};
+
+/**
+ * Where the i-th of n dots sits along a side. Along the top and bottom the
+ * dots spread across the width; down the sides they spread below the title
+ * bar, so each lines up with its name inside the card.
+ */
+function spread(side: Side, i: number, n: number): CSSProperties {
+  const frac = (i + 1) / (n + 1);
+  return side === 'top' || side === 'bottom'
+    ? { left: `${frac * 100}%` }
+    : { top: `calc(34px + (100% - 34px) * ${frac})` };
+}
+
 /**
  * One box on the canvas: a dark title bar, what it is set to do, and — during
  * a run — what it did. Modelled on the reference: charcoal header with a
  * chevron, white body, a "+" to grow the flow from here.
+ *
+ * A turned box moves its dots to other sides; the card, its title and its
+ * text always stay upright and readable.
  */
 export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlowNode>) {
   const store = useEditorStore();
@@ -29,7 +54,11 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
   const collapsed = node.ui?.collapsed === true;
   const errors = problems?.filter((d) => d.severity === 'error') ?? [];
   const warnings = problems?.filter((d) => d.severity !== 'error') ?? [];
-  const labelledOutputs = outputs.length > 1 || outputs.some((p) => p.id !== 'main');
+  const sides = sidesFor(rotationOf(node));
+  // Port names sit inside the card along the output side. A collapsed card is
+  // too short to hold them anywhere but the bottom row, so there they go quiet.
+  const showPortNames =
+    (outputs.length > 1 || outputs.some((p) => p.id !== 'main')) && (!collapsed || sides.output === 'bottom');
 
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -44,26 +73,38 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
 
   const classes = [
     'gk-box',
+    `faces-${sides.output}`,
+    showPortNames ? 'has-port-names' : '',
     selected ? 'is-selected' : '',
     errors.length ? 'has-error' : '',
     run ? `run-${run.status}` : running ? 'run-untouched' : '',
     node.disabled ? 'is-disabled' : '',
   ].join(' ');
 
+  const handle = (port: PortSpec, i: number, list: PortSpec[], kind: 'in' | 'out') => {
+    const side = kind === 'in' ? sides.input : sides.output;
+    const name = portLabel(node.type, port.id);
+    return (
+      <Handle
+        key={port.id}
+        type={kind === 'in' ? 'target' : 'source'}
+        position={POSITION[side]}
+        id={port.id}
+        className={`gk-handle gk-handle-${kind}`}
+        style={{ ...spread(side, i, list.length), ...(kind === 'out' ? { ['--port' as string]: portHue(port.id) } : {}) }}
+        title={name || (kind === 'in' ? 'input' : 'output')}
+        aria-label={`${kind === 'in' ? 'Input' : 'Output'}${name ? `: ${name}` : ''}`}
+      />
+    );
+  };
+
+  // Names down a side need room: a Switch's five outputs would crowd a standard-height card.
+  const sideways = sides.output === 'left' || sides.output === 'right';
+  const minHeight = showPortNames && sideways ? 34 + 22 * (outputs.length + 1) : undefined;
+
   return (
-    <div className={classes} style={{ ['--hue' as string]: look?.category.hue ?? '#6b7280' }}>
-      {inputs.map((port, i) => (
-        <Handle
-          key={port.id}
-          type="target"
-          position={Position.Top}
-          id={port.id}
-          className="gk-handle gk-handle-in"
-          style={{ left: `${((i + 1) / (inputs.length + 1)) * 100}%` }}
-          title={portLabel(node.type, port.id) || 'input'}
-          aria-label={portLabel(node.type, port.id) ? `Input: ${portLabel(node.type, port.id)}` : 'Input'}
-        />
-      ))}
+    <div className={classes} style={{ ['--hue' as string]: look?.category.hue ?? '#6b7280', ...(minHeight ? { minHeight } : {}) }}>
+      {inputs.map((port, i) => handle(port, i, inputs, 'in'))}
 
       <div className="gk-box-head">
         <span className="gk-box-glyph">{look ? <Icon name={look.glyph} size={13} /> : null}</span>
@@ -94,19 +135,6 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
       {run ? <RunStrip run={run} /> : null}
 
       <div className="gk-box-foot">
-        <div className="gk-box-ports">
-          {labelledOutputs
-            ? outputs.map((port, i) => (
-                <span
-                  key={port.id}
-                  className="gk-port-name"
-                  style={{ left: `${((i + 1) / (outputs.length + 1)) * 100}%`, color: portHue(port.id) }}
-                >
-                  {portLabel(node.type, port.id)}
-                </span>
-              ))
-            : null}
-        </div>
         {outputs.length > 0 ? (
           <button type="button" className="gk-box-grow nodrag" onClick={grow} aria-label="Add a box after this one" title="Add a box after this one">
             <Icon name="plus" size={14} />
@@ -114,21 +142,21 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
         ) : null}
       </div>
 
-      {outputs.map((port, i) => (
-        <Handle
-          key={port.id}
-          type="source"
-          position={Position.Bottom}
-          id={port.id}
-          className="gk-handle gk-handle-out"
-          style={{ left: `${((i + 1) / (outputs.length + 1)) * 100}%`, ['--port' as string]: portHue(port.id) }}
-          title={portLabel(node.type, port.id) || 'output'}
-          aria-label={portLabel(node.type, port.id) ? `Output: ${portLabel(node.type, port.id)}` : 'Output'}
-        />
-      ))}
+      {showPortNames ? (
+        <div className={`gk-box-ports gk-ports-${sides.output}`} aria-hidden="true">
+          {outputs.map((port, i) => (
+            <span key={port.id} className="gk-port-name" style={{ ...spread(sides.output, i, outputs.length), color: portHue(port.id) }}>
+              {portLabel(node.type, port.id)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {outputs.map((port, i) => handle(port, i, outputs, 'out'))}
     </div>
   );
 });
+
 
 function RunStrip({ run }: { run: BoxRunView }) {
   // A loop's closing box emits nothing itself, so it reports passes alone.

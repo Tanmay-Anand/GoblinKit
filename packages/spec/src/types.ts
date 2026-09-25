@@ -82,6 +82,8 @@ export interface NodePolicy {
   onError: OnErrorBehaviour;
 }
 
+export type Rotation = 0 | 90 | 180 | 270;
+
 export interface NodeInstance {
   /** Stable and opaque. Labels change freely; this never does. */
   id: NodeId;
@@ -95,7 +97,18 @@ export interface NodeInstance {
    * Presentation, quarantined. A headless consumer ignores it entirely, and
    * moving a node on the canvas produces a diff that is obviously non-semantic.
    */
-  ui?: { position?: XY; width?: number; collapsed?: boolean; notes?: string };
+  ui?: {
+    position?: XY;
+    width?: number;
+    collapsed?: boolean;
+    notes?: string;
+    /**
+     * Which way the box faces, in degrees clockwise. 0: wires come in at the
+     * top and leave at the bottom; 90: in on the right, out on the left; and
+     * so on. The card and its text never turn — only where its wires attach.
+     */
+    rotation?: Rotation;
+  };
   disabled?: boolean;
   /** Authoring aid: short-circuits execution with a fixed envelope. */
   pinnedData?: Envelope;
