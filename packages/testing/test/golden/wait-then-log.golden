@@ -1,0 +1,13 @@
+run started with 1 item(s)
+→ start
+✓ start main=1
+  e1 carried 1
+→ pause
+✓ pause main=1
+⏲ wait for pause after 5000ms
+⏲ cleared
+  e2 carried 1
+→ note
+✓ note main=1
+run succeeded
+  output {"id":1}

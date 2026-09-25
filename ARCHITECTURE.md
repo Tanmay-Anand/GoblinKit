@@ -589,7 +589,7 @@ export interface RunDriver {
 
 ### 8.1 In-process driver
 
-Everything in one process, in-memory journal, deterministic fake clock. Used by unit tests, the `goblin run` CLI, and local development. Ships in the kit and is the reason the test suite needs no infrastructure.
+Everything in one process, in-memory journal, deterministic fake clock. Used by unit tests, the `goblin run` CLI, and local development. Ships in the kit and is the reason the test suite needs no infrastructure. It is also the driver behind the first product: the local web app runs workflows with it, using a real clock and a journal appended to disk rather than held only in memory (§19, ADR-016).
 
 ### 8.2 Queue driver *(production default)*
 
@@ -1041,7 +1041,7 @@ Per node run: input envelope, output envelope, config **as resolved**, timing, a
 | nodes | Harness tests + the shared contract suite (§12.3) |
 | drivers | In-memory driver for logic; testcontainers Postgres for the queue driver; **chaos tests** that kill workers mid-run and assert exactly-once outcomes |
 | editor | Component tests; a render-count budget test that fails if editing one node re-renders others |
-| e2e | Playwright: build a workflow, run it, inspect results, break it, replay from failure |
+| e2e | Playwright (`e2e/`): build a workflow from an empty canvas, run it, inspect results, break it, reopen a past run. Real server, real browser, own workspace; state arranged over the API, locators by role and accessible name. Replay-from-failure joins when Stage 5 builds it |
 
 The golden-file suite for `runtime` is the highest-value test asset in the repo. Because `advance` is pure, a scheduling regression shows up as a readable diff in a command stream — which is the difference between catching engine bugs in CI and catching them in production.
 
@@ -1096,27 +1096,45 @@ Compact ADRs: decision, alternatives, why.
 **ADR-015 — React Flow with an external document store.**
 *Alternatives:* React Flow as state owner; custom canvas/WebGL. *Why:* the document must be framework-free and serializable (P1); React Flow's own guidance is to own the state externally (§1.4). Canvas/WebGL wins on huge graphs but forfeits React inside nodes, which the config UX depends on.
 
+**ADR-016 — The canvas before production durability; local single-user first.**
+*Alternatives:* the original order (durability, then the editor, then the platform). *Why:* the product is "connect boxes, press Run", and none of it can be judged until that loop exists. One user on one machine needs no queue, no leases and no accounts, so Postgres and the queue driver would be solving problems the first product does not have. *What keeps this from becoming a rewrite:* local storage sits behind the same `WorkflowStore` / `RunStore` ports that Postgres later implements, with one shared contract test suite both must pass (P5). The local API is the real `apps/api` running without auth, not a throwaway server. And local mode uses a single fixed tenant id (`local`) that flows through every call, so P7's "no add-tenancy-later path" still holds. *Cost accepted:* until Stage 7, automatic runs happen only while the app is open, and a crash is recovered by folding journal files rather than by a sweeper.
+
 ---
 
 ## 19. Build order
 
 Sequenced so that each stage is independently demonstrable, and so the reusable core is proven before product surface is built on it.
 
-**Stage 1 — The kit's spine.** `@goblin/spec` (types, zod, validation, migrations), `@goblin/graph` (topo, cycles, scopes, affected-subgraph), `@goblin/runtime` (`advance`, state, commands, events, join policies, retry), `@goblin/drivers-inprocess`, `@goblin/testing` with the golden-file harness. Deliverable: `goblin run workflow.json` executes a real graph with branching, loops, retries, and skips — with no database, no queue, and no UI. *If this stage is right, everything after it is comparatively mechanical.*
+**The product loop comes first.** You start the app, pick boxes from a palette, connect them on a canvas, press **Run**, and watch the automation execute box by box. Every stage after Stage 2 either makes that loop possible or adds boxes to it. The first product is a **local web app for one user**: `pnpm dev`, open `localhost` in a browser, no login, workflows saved as files on your machine. Production durability, accounts and scale come after the loop works, in Stages 7–9. See ADR-016 for why this order replaced the original one.
 
-**Stage 2 — The node SDK.** `defineManifest` / `defineExecutor`, `ctx`, the harness, the contract suite, plus `nodes-core`: Manual/Webhook/Schedule triggers, HTTP Request, If, Switch, Merge, Set/Transform, Code, ForEach/While scopes, Wait, Sub-workflow.
+Stages 1–2 are **done**. Stages 3–6 are the single-user product. Stages 7–9 are for when it is more than one person on one machine.
 
-**Stage 3 — Durability.** `@goblin/persistence` (journal, snapshots, outbox), `@goblin/drivers-queue` (leases, heartbeats, recovery sweeper, per-class queues), retention and compaction. Chaos test: kill workers mid-run, assert exactly-once outcomes.
+**Stage 1 — The kit's spine.** *Done.* `@goblin/spec` (types, zod, validation, migrations), `@goblin/graph` (topo, cycles, scopes, affected-subgraph), `@goblin/runtime` (`advance`, state, commands, events, join policies, retry), `@goblin/drivers-inprocess`. (`@goblin/testing` with the golden-file harness moved to Stage 3's entry gate; a determinism test covers the property it rests on until then.) Deliverable: `goblin run workflow.json` executes a real graph with branching, loops, retries, and skips — with no database, no queue, and no UI. *If this stage is right, everything after it is comparatively mechanical.*
 
-**Stage 4 — The editor.** Document store + command/undo, React Flow canvas with scope containers, palette from manifests, schema-driven inspector, expression editor with autocomplete, diagnostics inline.
+**Stage 2 — The node SDK and the first boxes.** *Done, except the reusable contract suite, which moves to Stage 3.* `defineManifest` / `defineExecutor`, `ctx`, the harness, plus the first ten boxes in `nodes-core`: Manual trigger, HTTP Request, If, Switch, Merge, Set, ForEach, While, Wait, Log. The remaining boxes originally listed here are spread across Stages 4–6, each placed where the capability it needs arrives.
 
-**Stage 5 — The platform.** API, auth, tenancy + RLS, credentials + envelope encryption + OAuth manager, webhook ingress with idempotency, scheduler with leader election, quotas.
+**Stage 3 — The canvas: the first usable app.** *Done.* The whole product loop, with the ten existing boxes. One piece shipped smaller than planned: a box inside a loop shows its pass count and the last pass's input and output, not a list of every pass. The journal holds all of them, so the list is a view to add, not data to capture.
 
-**Stage 6 — The experience that sells it.** Run inspector with lineage and journal scrubbing, partial execution, pinned data, replay-from-failure, error workflows, "copy as failing test case".
+- *Entry gate:* `@goblin/testing` with the golden-file harness and the node contract suite, finished before any UI leans on the engine (§17).
+- `apps/web` + `@goblin/editor` (§15): document store with command/undo, React Flow canvas, a palette built from manifests, drag a box on, drag from an output port to an input port to connect, a schema-driven settings panel, validation diagnostics shown on the offending box and edge, auto-layout on demand.
+- `apps/api` in **local mode**: serves the editor, and keeps a workspace folder on disk (`workspace/workflows/*.json`, `workspace/runs/*.journal.json`) behind `WorkflowStore` / `RunStore` ports. It runs workflows with the in-process driver (§8.1). Executors stay on this server and never reach the browser (ADR-008).
+- **Run:** the Run button posts the document. The API streams journal entries back over Server-Sent Events. Each box shows running / succeeded / skipped / failed live, fed from the separate run-status slice (§15.3 rule 5). Click a box to see its input, output and error. Loop passes are listed per iteration.
+- Save, open, rename and delete workflows, with a list of past runs per workflow.
+- *Deliverable:* build `examples/order-triage.json` from an empty canvas, press Run, watch it light up, then reopen it tomorrow and find it and its runs still there. `pnpm dev` starts everything.
 
-**Stage 7 — Scale and open the platform.** Per-class worker pools, dedicated sandbox pool, node pack registry with signing, run history retention tiers.
+**Stage 4 — Boxes that start by themselves.** Schedule and Webhook triggers, plus an **Active** switch per workflow. The local API gains a scheduler and a `localhost` webhook URL per workflow. Runs must now survive closing the app, so this stage brings the part of durability a single machine needs. The journal is appended to disk entry by entry, and on startup the API folds unfinished journals and resumes them (§7.4). A Wait of three days outlives a restart. Automatic runs happen only while the app is running. That limit is stated in the UI, not hidden.
 
-Stages 1–3 constitute the reusable kit. A second product built on GoblinKit starts at Stage 4 with a different node set and different chrome — which is the outcome you asked the architecture to deliver.
+**Stage 5 — Power boxes and a better run view.** Code (QuickJS-WASM with fuel limits, §13.2, the real sandbox it has waited for), Sub-workflow, and an **AI step**: a box that calls a language model to summarize, classify, extract or generate, with the provider behind a port. The expression editor gains autocomplete from real upstream data (§15.4). Pinned data, re-run from a failed box, journal scrubbing, and "copy as failing test case" arrive here (§15.5).
+
+**Stage 6 — App integrations.** Local credentials: encrypted at rest on disk, resolved only on the server, never sent to the browser. OAuth sign-in for the providers that require it. The first integration packs, each its own `nodes-*` package: **Slack**, **Email** (SMTP send, IMAP trigger), **Google Sheets**. After these, a new integration is a new pack, not an engine change.
+
+**Stage 7 — Production durability.** `@goblin/persistence` on Postgres (journal, snapshots, outbox), implementing the same `WorkflowStore` / `RunStore` ports the local files did. Then `@goblin/drivers-queue` (leases, heartbeats, recovery sweeper, per-class queues), retention and compaction. Chaos test: kill workers mid-run, assert exactly-once outcomes.
+
+**Stage 8 — The platform.** Accounts and auth, tenancy + RLS, credentials moved to envelope encryption + KMS, a shared OAuth manager, hosted webhook ingress with idempotency, a scheduler with leader election, quotas, error workflows.
+
+**Stage 9 — Scale and open the platform.** Per-class worker pools, a dedicated sandbox pool, a node pack registry with signing, run-history retention tiers.
+
+The reusable kit is still `spec` + `graph` + `runtime` + `node-sdk` + the drivers; `@goblin/editor` is reusable chrome on top. A second product built on GoblinKit keeps both and replaces the node packs and the app shell — which is the outcome you asked the architecture to deliver.
 
 ---
 
