@@ -45,6 +45,8 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
   const problems = useEditor((s) => s.problems.nodes[id]);
   const run = useEditor((s) => s.run.projection.boxes[id]);
   const running = useEditor((s) => s.run.projection.status !== 'idle');
+  const trigger = useEditor((s) => s.triggers[id]);
+  const active = useEditor((s) => s.activation?.active === true);
 
   if (!node) return null;
   const manifest = registry.get(node.type, node.typeVersion);
@@ -124,9 +126,20 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
       {collapsed ? null : (
         <div className="gk-box-body">
           <div className="gk-box-kind">{manifest?.title ?? `Unknown box: ${node.type}`}</div>
-          <div className="gk-box-summary" title={summarize(node, manifest)}>
-            {summarize(node, manifest)}
+          <div className="gk-box-summary" title={summarize(node, manifest, trigger)}>
+            {summarize(node, manifest, trigger)}
           </div>
+          {trigger?.problem ? <div className="gk-box-error">{trigger.problem}</div> : null}
+          {active && trigger?.nextRunAt ? (
+            <div className="gk-box-next">
+              <Icon name="clock" size={12} /> Next run {nextTime(trigger.nextRunAt)}
+            </div>
+          ) : null}
+          {active && trigger?.kind === 'webhook' ? (
+            <div className="gk-box-next">
+              <span className="gk-live-dot" aria-hidden="true" /> Listening
+            </div>
+          ) : null}
           {warnings.length > 0 && !errors.length ? <div className="gk-box-warn">{warnings[0]!.message}</div> : null}
           {errors.length > 0 ? <div className="gk-box-error">{errors[0]!.message}</div> : null}
         </div>
@@ -157,6 +170,13 @@ export const BoxNode = memo(function BoxNode({ id, selected }: NodeProps<BoxFlow
   );
 });
 
+
+function nextTime(ms: number): string {
+  const d = new Date(ms);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 function RunStrip({ run }: { run: BoxRunView }) {
   // A loop's closing box emits nothing itself, so it reports passes alone.

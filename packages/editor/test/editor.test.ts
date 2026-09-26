@@ -23,6 +23,8 @@ const nullBackend: EditorBackend = {
   getRun: async () => {
     throw new Error('not in this test');
   },
+  getActivation: async (workflowId) => ({ workflowId, active: false, triggers: [] }),
+  setActive: async (workflowId, active) => ({ workflowId, active, triggers: [] }),
 };
 
 const registry = new MapRegistry(coreManifests);

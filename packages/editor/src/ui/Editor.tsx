@@ -14,6 +14,7 @@ import { SettingsPanel } from './SettingsPanel.js';
 import { TopBar } from './TopBar.js';
 import { EditorContext, useEditor, useEditorStore } from './context.js';
 import { Icon } from './icons.js';
+import { lowerFirst } from './text.js';
 
 export interface EditorProps {
   doc: WorkflowDocument;
@@ -35,6 +36,14 @@ export function Editor(props: EditorProps) {
 
   useEffect(() => {
     void store.getState().refreshHistory();
+    void store.getState().refreshActivation();
+    // While switched on, runs start without anyone pressing Run: keep the
+    // history and each schedule's next time current. Cheap, local calls.
+    const poll = setInterval(() => {
+      if (!store.getState().activation?.active) return;
+      void store.getState().refreshActivation();
+      void store.getState().refreshHistory();
+    }, 10_000);
     // Save whatever is pending when leaving the screen or closing the tab.
     const beforeUnload = (e: BeforeUnloadEvent) => {
       if (store.getState().save.state !== 'saved') {
@@ -44,6 +53,7 @@ export function Editor(props: EditorProps) {
     };
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
+      clearInterval(poll);
       window.removeEventListener('beforeunload', beforeUnload);
       void store.getState().flushSave();
     };
@@ -57,6 +67,7 @@ export function Editor(props: EditorProps) {
           <Rail logoUrl={props.logoUrl} onBack={props.onBack} />
           <div className="gk-main">
             <TopBar onBack={props.onBack} />
+            <ActiveBanner />
             <PastRunBanner />
             <div className="gk-canvas">
               <Canvas />
@@ -116,6 +127,38 @@ function FloatingPanel() {
     case 'runs':
       return <RunsPanel />;
   }
+}
+
+/**
+ * While switched on: what will start this workflow, and the one limit that
+ * matters in local mode — it only happens while GoblinKit is open.
+ */
+function ActiveBanner() {
+  const activation = useEditor((s) => s.activation);
+  if (!activation?.active) return null;
+  const parts = activation.triggers.map((t) =>
+    t.kind === 'schedule'
+      ? `${t.label}: ${lowerFirst(t.description)}${t.nextRunAt ? `, next at ${time(t.nextRunAt)}` : ''}`
+      : `${t.label}: listening for ${lowerFirst(t.description)}`,
+  );
+  const failing = activation.triggers.find((t) => t.lastError);
+  return (
+    <div className="gk-banner gk-banner-active" role="status">
+      <span className="gk-live-dot" aria-hidden="true" />
+      <span>
+        <strong>Active.</strong> {parts.join(' · ')}. Starts by itself only while GoblinKit is open.
+        {failing ? <span className="gk-banner-warn"> {failing.lastError}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+function time(ms: number): string {
+  const d = new Date(ms);
+  const today = d.toDateString() === new Date().toDateString();
+  return today
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function PastRunBanner() {

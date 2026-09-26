@@ -77,7 +77,10 @@ export function WorkflowList({ logoUrl, onOpen }: { logoUrl: string; onOpen: (id
                   aria-label={w.name}
                   {...(w.description ? { 'aria-describedby': `desc-${w.id}` } : {})}
                 >
-                  <span className="gk-home-name">{w.name}</span>
+                  <span className="gk-home-name">
+                    {w.name}
+                    {w.active ? <span className="gk-home-active">Active</span> : null}
+                  </span>
                   {w.description ? (
                     <span className="gk-home-desc" id={`desc-${w.id}`}>
                       {w.description}

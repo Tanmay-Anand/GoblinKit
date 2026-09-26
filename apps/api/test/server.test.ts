@@ -9,7 +9,7 @@ import { MapRegistry, type WorkflowDocument } from '@goblin/spec';
 
 import type { RunRecord, RunStreamMessage } from '../src/protocol.js';
 import { createApi } from '../src/server.js';
-import { FileRunStore, FileWorkflowStore } from '../src/stores.js';
+import { FileActivationStore, FileRunStore, FileWorkflowStore } from '../src/stores.js';
 
 /**
  * The API end to end, over real HTTP on a random local port: create a
@@ -25,6 +25,7 @@ beforeEach(async () => {
   api = createApi({
     workflows: new FileWorkflowStore(join(dir, 'workflows')),
     runs: new FileRunStore(join(dir, 'runs')),
+    activations: new FileActivationStore(join(dir, 'activations.json')),
     registry: new MapRegistry(coreManifests),
     manifests: coreManifests,
     nodes: coreNodes,

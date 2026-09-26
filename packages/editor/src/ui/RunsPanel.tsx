@@ -41,6 +41,7 @@ export function RunsPanel() {
               <StatusPill status={live ? 'running' : (record?.status ?? p.status)} />
               <span className="gk-muted">{record ? describeWhen(record) : 'Starting…'}</span>
             </div>
+            {record ? <p className="gk-muted gk-run-by">{startedBy(record)}{record.resumedAt ? ' · picked up again after GoblinKit restarted' : ''}</p> : null}
             <div className="gk-tiles">
               <Tile label="Boxes run" value={p.counters.nodesRun} />
               <Tile label="Items produced" value={p.counters.itemsProcessed} />
@@ -89,7 +90,10 @@ export function RunsPanel() {
                   onClick={() => void store.getState().viewRun(r.runId)}
                 >
                   <StatusDot status={r.status} />
-                  <span className="gk-history-when">{clockTime(r.startedAt)}</span>
+                  <span className="gk-history-when">
+                    {clockTime(r.startedAt)}
+                    <span className="gk-history-by">{startedBy(r)}</span>
+                  </span>
                   <span className="gk-muted">{duration(r)}</span>
                   <span className="gk-history-count">{r.counters ? `${r.counters.nodesRun} boxes` : ''}</span>
                 </button>
@@ -100,6 +104,18 @@ export function RunsPanel() {
       </div>
     </aside>
   );
+}
+
+/** What started a run, in words: the Run button, a schedule, or a webhook call. */
+function startedBy(r: RunRecord): string {
+  switch (r.trigger?.kind) {
+    case 'schedule':
+      return 'by its schedule';
+    case 'webhook':
+      return 'by a webhook call';
+    default:
+      return 'by Run';
+  }
 }
 
 function Tile({ label, value, tone }: { label: string; value: number; tone?: 'bad' | undefined }) {

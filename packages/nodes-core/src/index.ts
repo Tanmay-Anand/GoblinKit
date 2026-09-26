@@ -18,6 +18,10 @@ import { defineExecutor, defineManifest, NodeFailure, type NodeDefinition } from
 import { evaluate } from '@goblin/expressions';
 import type { Item, JsonObject, JsonValue, NodeManifest } from '@goblin/spec';
 
+import { WEEKDAYS } from './schedule.js';
+
+export { describeSchedule, nextFire, parseCron, scheduleSettings, toCron, type ScheduleSettings } from './schedule.js';
+
 /* ------------------------------------------------------------------ manual */
 
 export const manualTrigger = defineManifest({
@@ -47,6 +51,91 @@ export const manualTrigger = defineManifest({
 });
 
 const manualTriggerNode = defineExecutor(manualTrigger, (ctx) => ctx.emit('main', [...ctx.items]));
+
+/* --------------------------------------------------------------- schedule */
+
+const TEST_INPUT_FIELD = {
+  name: 'testInput',
+  type: 'json',
+  label: 'Test input',
+  description: 'What Run starts with in place of a real trigger, so you can try the workflow without waiting.',
+  default: {},
+} as const;
+
+export const scheduleTrigger = defineManifest({
+  type: 'core.trigger.schedule',
+  version: 1,
+  title: 'Schedule',
+  group: 'trigger',
+  description: 'Starts a run on a timer, while the workflow is active and GoblinKit is open.',
+  executionMode: 'batch',
+  trigger: true,
+  ports: { inputs: [], outputs: [{ id: 'main' }] },
+  config: {
+    fields: [
+      { name: 'repeat', label: 'Repeat', type: 'select', options: ['minutes', 'hours', 'day', 'week', 'cron'], default: 'minutes' },
+      {
+        name: 'every',
+        label: 'Every',
+        type: 'number',
+        default: 15,
+        description: 'How many minutes or hours between runs.',
+        showWhen: { field: 'repeat', equals: ['minutes', 'hours'] },
+      },
+      { name: 'weekday', label: 'On', type: 'select', options: [...WEEKDAYS], default: 'Monday', showWhen: { field: 'repeat', equals: ['week'] } },
+      {
+        name: 'at',
+        label: 'At',
+        type: 'string',
+        default: '09:00',
+        description: '24-hour time, on this computer’s clock.',
+        showWhen: { field: 'repeat', equals: ['day', 'week'] },
+      },
+      {
+        name: 'cron',
+        label: 'Cron rule',
+        type: 'string',
+        required: true,
+        description: 'Five fields: minute hour day month weekday. "0 9 * * 1-5" is 09:00 on weekdays.',
+        showWhen: { field: 'repeat', equals: ['cron'] },
+      },
+      TEST_INPUT_FIELD,
+    ],
+  },
+});
+
+/** The scheduler starts the run with { firedAt, scheduledFor }; the box passes it on. */
+const scheduleTriggerNode = defineExecutor(scheduleTrigger, (ctx) => ctx.emit('main', [...ctx.items]));
+
+/* ---------------------------------------------------------------- webhook */
+
+export const webhookTrigger = defineManifest({
+  type: 'core.trigger.webhook',
+  version: 1,
+  title: 'Webhook',
+  group: 'trigger',
+  description: 'Starts a run when another program calls its URL, while the workflow is active and GoblinKit is open.',
+  executionMode: 'batch',
+  trigger: true,
+  ports: { inputs: [], outputs: [{ id: 'main' }] },
+  config: {
+    fields: [
+      { name: 'method', label: 'Accept', type: 'select', options: ['POST', 'GET', 'PUT', 'PATCH', 'DELETE', 'ANY'], default: 'POST' },
+      {
+        name: 'respond',
+        label: 'Answer the caller',
+        type: 'select',
+        options: ['immediately', 'when the run finishes'],
+        default: 'immediately',
+        description: 'Immediately: the caller gets the run id. When the run finishes: it gets the run’s result (up to 30 s).',
+      },
+      { ...TEST_INPUT_FIELD, default: { body: {}, query: {} } },
+    ],
+  },
+});
+
+/** The server starts the run with { method, body, query, headers }; the box passes it on. */
+const webhookTriggerNode = defineExecutor(webhookTrigger, (ctx) => ctx.emit('main', [...ctx.items]));
 
 /* --------------------------------------------------------------------- set */
 
@@ -451,6 +540,8 @@ export const waitManifest = defineManifest({
 /** Every manifest in the pack, including the ones the engine implements. */
 export const coreManifests: NodeManifest[] = [
   manualTrigger,
+  scheduleTrigger,
+  webhookTrigger,
   setManifest,
   ifManifest,
   switchManifest,
@@ -466,6 +557,8 @@ export const coreManifests: NodeManifest[] = [
 /** Only the nodes that have an executor. The rest are scheduling decisions. */
 export const coreNodes: NodeDefinition[] = [
   manualTriggerNode,
+  scheduleTriggerNode,
+  webhookTriggerNode,
   setNode,
   ifNode,
   switchNode,

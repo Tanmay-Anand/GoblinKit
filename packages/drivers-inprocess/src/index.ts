@@ -29,6 +29,13 @@ export interface RunOptions {
   registry: ManifestRegistry;
   nodes: NodeDefinition[];
   input?: Envelope;
+  /** The trigger that fired; the others are skipped. Absent: every trigger starts. */
+  triggerNode?: string;
+  /**
+   * Continue a run from what its journal already records, instead of
+   * starting it: after the app was closed mid-run, say. See `resumeFrom`.
+   */
+  resume?: { journal: readonly JournalEntry[] };
   runId?: string;
   /** Wall-clock waits are honoured by default; tests turn them off. */
   realTimers?: boolean;
@@ -49,12 +56,23 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
   const runId = options.runId ?? randomUUID();
   const executors = new Map(options.nodes.map((n) => [`${n.manifest.type}@${n.manifest.version}`, n]));
 
-  let state = initialState(runId);
-  const journal: JournalEntry[] = [];
-  const pending: RunEvent[] = [{ kind: 'RunStarted', trigger: options.input ?? { items: [{ data: {} }] } }];
   const inFlight = new Set<Promise<void>>();
   const timers = new Map<string, { fireAt: number; cancel?: () => void }>();
   const clock = options.clock ?? (() => Date.now());
+
+  let state = initialState(runId);
+  const journal: JournalEntry[] = [];
+  const pending: RunEvent[] = [];
+  if (options.resume) {
+    ({ state } = resumeFrom(runId, options.resume.journal, pending, timers));
+    journal.push(...options.resume.journal);
+  } else {
+    pending.push({
+      kind: 'RunStarted',
+      trigger: options.input ?? { items: [{ data: {} }] },
+      ...(options.triggerNode ? { triggerNode: options.triggerNode } : {}),
+    });
+  }
 
   const ctxFor = (): SchedulerContext => ({
     graph,
@@ -190,6 +208,43 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
     timers.delete(timerId);
     deliver({ kind: 'TimerFired', timerId });
   }
+}
+
+/**
+ * Pick a run back up from its journal.
+ *
+ * The state is the journal folded, as always. What the journal cannot say is
+ * what was happening in memory when the process stopped, and there are only
+ * two kinds of that:
+ *
+ *  - A box that had started and not finished. Its work may or may not have
+ *    happened, so it is reported as a retryable failure: the box's own retry
+ *    setting decides whether it runs again, exactly as if it had timed out.
+ *    Its idempotency key is unchanged, so an API that honours the key sees
+ *    the retry as the same request.
+ *  - A timer — a Wait, or a retry's backoff. It is re-armed for the time it
+ *    was always due, so a three-day Wait still ends on the third day; one
+ *    that fell due while the app was closed fires straight away.
+ */
+export function resumeFrom(
+  runId: string,
+  entries: readonly JournalEntry[],
+  pending: RunEvent[],
+  timers: Map<string, { fireAt: number }>,
+): { state: RunState } {
+  const state = foldJournal(runId, entries);
+  if (state.status === 'succeeded' || state.status === 'failed' || state.status === 'cancelled') return { state };
+
+  for (const run of Object.values(state.nodeRuns)) {
+    if (run.status !== 'running') continue;
+    pending.push({
+      kind: 'NodeFailed',
+      nodeRunId: run.nodeRunId,
+      error: { message: 'GoblinKit stopped while this box was running.', code: 'INTERRUPTED', retryable: true },
+    });
+  }
+  for (const timer of Object.values(state.pendingTimers)) timers.set(timer.timerId, { fireAt: timer.fireAt });
+  return { state };
 }
 
 /** The `{{ $node['id'] }}` view of what has run so far. */

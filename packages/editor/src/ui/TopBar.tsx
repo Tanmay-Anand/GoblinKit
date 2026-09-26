@@ -18,6 +18,8 @@ export function TopBar({ onBack }: { onBack: () => void }) {
   const status = useEditor((s) => s.run.projection.status);
   const starting = useEditor((s) => s.run.starting);
   const historical = useEditor((s) => s.run.historical);
+  const active = useEditor((s) => s.activation?.active === true);
+  const switching = useEditor((s) => s.switching);
   const busy = starting || status === 'running' || status === 'waiting';
 
   const showProblem = () => {
@@ -48,7 +50,7 @@ export function TopBar({ onBack }: { onBack: () => void }) {
         aria-label="Workflow name"
         size={Math.max(8, name.length + 1)}
       />
-      <span className="gk-badge">Draft</span>
+      <span className={`gk-badge${active ? ' is-active' : ''}`}>{active ? 'Active' : 'Draft'}</span>
       <span className={`gk-save gk-save-${save.state}`} title={save.message} aria-live="polite">
         {save.state === 'saved' ? 'Saved' : save.state === 'saving' ? 'Saving…' : save.state === 'unsaved' ? 'Unsaved changes' : 'Could not save'}
       </span>
@@ -76,6 +78,16 @@ export function TopBar({ onBack }: { onBack: () => void }) {
           aria-expanded={panel === 'runs'}
         >
           {historical ? 'Past run' : 'Runs'} <Icon name={panel === 'runs' ? 'chevronUp' : 'chevronDown'} size={14} />
+        </button>
+        <button
+          type="button"
+          className={`gk-btn-outline ${active ? 'gk-btn-stop' : 'gk-btn-accent'}`}
+          disabled={switching}
+          aria-pressed={active}
+          title={active ? 'Stop starting by itself' : 'Let its Schedule and Webhook boxes start it by themselves'}
+          onClick={() => void store.getState().setActive(!active)}
+        >
+          {active ? 'Deactivate' : 'Activate'}
         </button>
         <button
           type="button"

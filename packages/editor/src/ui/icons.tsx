@@ -4,6 +4,7 @@ import type { Glyph } from '../describe.js';
 const PATHS: Record<Glyph | UiIcon, string> = {
   // box glyphs
   play: 'M8 5.5v13l10-6.5z',
+  hook: 'M10 14a4 4 0 1 1 3.5-6 M14 10a4 4 0 1 1-1.8 7.2 M8 18h4 M12 6l3 5',
   branch: 'M7 4v16 M7 12h6a4 4 0 0 0 4-4V4',
   switch: 'M4 12h6 M10 12l4-6h6 M10 12l4 6h6 M14 12h6',
   merge: 'M6 4v4a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4 M18 4v4a4 4 0 0 1-4 4',

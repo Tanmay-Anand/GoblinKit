@@ -20,12 +20,18 @@ durably, observably, and at multi-tenant scale.
 
 ## What runs today
 
-Stages 1–3 of the [build order](#build-order): the engine, the first ten boxes, and
-**the canvas** — start the app, pick boxes, connect them, press Run.
+Stages 1–4 of the [build order](#build-order): the engine, **the canvas** — start the
+app, pick boxes, connect them, press Run — and workflows that **start by themselves**.
+
+On Windows, double-click **`Start GoblinKit.cmd`** in the project folder: it installs
+what it needs the first time, starts GoblinKit, and opens it in your browser once it is
+ready. Keep its window open while you work; close it to stop. Double-clicking it again
+while GoblinKit is running just opens the browser. Or, from a terminal:
 
 ```bash
 pnpm install
-pnpm dev          # then open http://127.0.0.1:5173
+pnpm start:app    # starts GoblinKit and opens the browser when ready
+pnpm dev          # the same, without opening the browser: http://127.0.0.1:5173
 ```
 
 <p align="center">
@@ -46,16 +52,25 @@ pnpm dev          # then open http://127.0.0.1:5173
 - **Run** streams the run onto the canvas as it happens: each box shows running, done,
   skipped or failed, and each wire how many items it carried. Click a box for the exact
   input and output it saw; open **Runs** for the history.
+- **Let it start by itself** with a **Schedule** box (every few minutes or hours, daily,
+  weekly, or a cron rule) or a **Webhook** box (a URL other programs on this computer call;
+  it can answer at once or with the run's result). Press **Activate** to switch those on:
+  the canvas shows when a schedule runs next and the URL to copy, and the history says
+  what started each run. Automatic starts happen only while GoblinKit is open.
+- **Runs survive a restart.** Each step is written to disk as it happens, so a run under
+  way when GoblinKit closes — even mid-way through a three-day Wait — carries on from where
+  it was on the next start.
 
 Everything is local: one user, no login, workflows and runs saved as JSON in
 `workspace/`. The server behind the canvas listens on `127.0.0.1` only and refuses
-requests from other websites. The first start seeds the order-triage example.
+requests from other websites — webhooks included, so no web page you visit can fire your
+workflows. The first start seeds the order-triage example.
 
 The engine also runs without the canvas:
 
 ```bash
-pnpm test                                    # 79 unit and integration tests
-pnpm test:e2e                                # 23 browser tests of the canvas, see e2e/README.md
+pnpm test                                    # 119 unit and integration tests
+pnpm test:e2e                                # 28 browser tests of the canvas, see e2e/README.md
 pnpm goblin run examples/order-triage.json --input '{"total":250,"lines":[{"sku":"A","qty":2,"price":30}]}'
 ```
 
@@ -83,17 +98,17 @@ always derived:
 | `advance()`, run state, journal + fold, join policies, retries, scopes, timers | `runtime` |
 | `{{ }}` interpreter with no `eval` and no host access | `expressions` |
 | `defineManifest` / `defineExecutor`, executor context, test harness | `node-sdk` |
-| Manual trigger, Set, If, Switch, Merge, HTTP Request, Log, ForEach, While, Wait | `nodes-core` |
-| Single-process driver: clock, executors, timers | `drivers-inprocess` |
+| Manual, Schedule and Webhook triggers, Set, If, Switch, Merge, HTTP Request, Log, ForEach, While, Wait; cron and next-fire | `nodes-core` |
+| Single-process driver: clock, executors, timers; resume from a journal | `drivers-inprocess` |
 | Golden-file run traces, the node-pack contract every pack must pass | `testing` |
 | Commands + undo, connection rules, live run view, the React Flow canvas and panels | `editor` |
-| Local server: workspace files behind storage ports, runs streamed over SSE | `apps/api` |
+| Local server: workspace files behind storage ports, journals appended as runs happen, runs streamed over SSE, the scheduler, webhooks, resume on startup | `apps/api` |
 | The app shell: workflow list, canvas screen | `apps/web` |
 | `goblin run` / `validate` / `replay` / `nodes` | `apps/cli` |
 
-**Next up: boxes that start by themselves (Stage 4)** — Schedule and Webhook, an Active
-switch per workflow, and runs that survive restarting the app. After it: power boxes
-(Stage 5), integrations (Stage 6), then production durability, accounts and scale. The
+**Next up: power boxes (Stage 5)** — Code in a real sandbox, Sub-workflow, an AI step,
+expression autocomplete, re-run from a failed box. After it: integrations (Stage 6), then
+production durability, accounts and scale. The
 Code node is deliberately absent until Stage 5 brings a real sandbox boundary —
 `node:vm` is not one, and expressions cover the common case without opening the host.
 
@@ -339,7 +354,7 @@ workflows saved as files. Production durability, accounts and scale follow once 
 | **1 · Spine** ✅ | `spec` + `graph` + `runtime` + in-process driver. `goblin run workflow.json` executes branching, loops, retries and skips — **no DB, no queue, no UI.** | — |
 | **2 · Node SDK** ✅ | `defineManifest`/`defineExecutor`, `ctx`, harness. | Manual, HTTP, If, Switch, Merge, Set, ForEach, While, Wait, Log |
 | **3 · Canvas** ✅ | **The first usable app.** Palette → drag boxes → connect ports → settings panel → **Run**, with each box lighting up live and its input/output one click away. Workflows and runs saved to a local workspace folder. Golden-file harness + contract suite first. | — (the ten above, on a canvas) |
-| **4 · Self-starting** | An **Active** switch per workflow, a local scheduler and webhook URL. Journals written to disk as they happen, so runs (and a three-day Wait) survive a restart. | Schedule, Webhook |
+| **4 · Self-starting** ✅ | An **Active** switch per workflow, a local scheduler and webhook URL. Journals written to disk as they happen, so runs (and a three-day Wait) survive a restart. | Schedule, Webhook |
 | **5 · Power boxes** | Real sandbox (QuickJS-WASM), expression autocomplete from real data, pinned data, re-run from a failed box, journal scrubbing. | Code, Sub-workflow, AI step |
 | **6 · Integrations** | Local encrypted credentials, OAuth sign-in. Each integration is its own node pack. | Slack, Email, Google Sheets |
 | **7 · Durability** | Postgres behind the same storage ports, queue driver with leases + heartbeats + recovery sweeper. Chaos test: kill workers mid-run, assert exactly-once. | — |
@@ -372,7 +387,7 @@ A change that breaks one of these needs an ADR ([ARCHITECTURE.md §18](ARCHITECT
 
 ## Status
 
-Stages 1–3 built: the canvas runs. Stage 4, self-starting workflows, is next. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
+Stages 1–4 built: the canvas runs, and workflows start by themselves. Stage 5, power boxes, is next. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
 
 ## License
 

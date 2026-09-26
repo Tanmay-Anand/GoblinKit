@@ -9,8 +9,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { JournalEntry } from '@goblin/runtime';
 import type { WorkflowDocument } from '@goblin/spec';
@@ -25,12 +25,35 @@ export interface WorkflowStore {
   delete(id: string): Promise<boolean>;
 }
 
+/**
+ * Runs, and their journals.
+ *
+ * The journal is appended as the run happens, a batch at a time, rather than
+ * written once at the end: after a crash, what is on disk is everything that
+ * had been decided, and the run picks up from there (Stage 4, §7.4).
+ */
 export interface RunStore {
-  create(record: RunRecord): Promise<void>;
-  finish(record: RunRecord, journal: readonly JournalEntry[]): Promise<void>;
+  /** Record a new run, with the exact workflow it runs, so it can be resumed as it was. */
+  create(record: RunRecord, document: WorkflowDocument): Promise<void>;
+  append(runId: string, entries: readonly JournalEntry[]): Promise<void>;
+  finish(record: RunRecord): Promise<void>;
   /** Newest first. */
   list(workflowId: string, limit?: number): Promise<RunRecord[]>;
   get(runId: string): Promise<RunDetail | undefined>;
+  /** The workflow as it was when this run started. */
+  document(runId: string): Promise<WorkflowDocument | undefined>;
+  /** Runs that started and never recorded an end: the ones to resume. */
+  unfinished(): Promise<RunRecord[]>;
+}
+
+/** Which workflows are switched on to start by themselves. */
+export interface ActivationStore {
+  isActive(workflowId: string): Promise<boolean>;
+  /** When it was switched on, or undefined if it is off. */
+  activatedAt(workflowId: string): Promise<number | undefined>;
+  set(workflowId: string, active: boolean, at?: number): Promise<void>;
+  /** Every active workflow's id. */
+  list(): Promise<string[]>;
 }
 
 /**
@@ -152,41 +175,122 @@ export class FileRunStore implements RunStore {
     return join(this.dir, `${runId}.run.json`);
   }
 
+  /** One JSON entry per line, appended as the run goes. */
   private journalPath(runId: string) {
+    return join(this.dir, `${runId}.journal.ndjson`);
+  }
+
+  /** Stage 3 wrote the whole journal as one JSON array at the end; still readable. */
+  private legacyJournalPath(runId: string) {
     return join(this.dir, `${runId}.journal.json`);
   }
 
-  async create(record: RunRecord): Promise<void> {
+  private documentPath(runId: string) {
+    return join(this.dir, `${runId}.workflow.json`);
+  }
+
+  async create(record: RunRecord, document: WorkflowDocument): Promise<void> {
     assertSafeId(record.runId);
     await mkdir(this.dir, { recursive: true });
+    await writeJson(this.documentPath(record.runId), document);
     await writeJson(this.recordPath(record.runId), record);
   }
 
-  async finish(record: RunRecord, journal: readonly JournalEntry[]): Promise<void> {
+  async append(runId: string, entries: readonly JournalEntry[]): Promise<void> {
+    assertSafeId(runId);
+    if (entries.length === 0) return;
+    await mkdir(this.dir, { recursive: true });
+    await appendFile(this.journalPath(runId), entries.map((e) => `${JSON.stringify(e)}\n`).join(''), 'utf8');
+  }
+
+  async finish(record: RunRecord): Promise<void> {
     assertSafeId(record.runId);
     await mkdir(this.dir, { recursive: true });
-    // Journal first: a record that says "finished" must never point at a
-    // journal that was not written.
-    await writeJson(this.journalPath(record.runId), journal);
     await writeJson(this.recordPath(record.runId), record);
   }
 
   async list(workflowId: string, limit = 50): Promise<RunRecord[]> {
-    await mkdir(this.dir, { recursive: true });
-    const records: RunRecord[] = [];
-    for (const file of await readdir(this.dir)) {
-      if (!file.endsWith('.run.json')) continue;
-      const record = await readJson<RunRecord>(join(this.dir, file));
-      if (record && record.workflowId === workflowId) records.push(record);
-    }
-    return records.sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+    return (await this.records())
+      .filter((r) => r.workflowId === workflowId)
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, limit);
   }
 
   async get(runId: string): Promise<RunDetail | undefined> {
     assertSafeId(runId);
     const record = await readJson<RunRecord>(this.recordPath(runId));
     if (!record) return undefined;
-    const journal = (await readJson<JournalEntry[]>(this.journalPath(runId))) ?? [];
-    return { record, journal };
+    return { record, journal: await this.journal(runId) };
+  }
+
+  async document(runId: string): Promise<WorkflowDocument | undefined> {
+    assertSafeId(runId);
+    return readJson<WorkflowDocument>(this.documentPath(runId));
+  }
+
+  async unfinished(): Promise<RunRecord[]> {
+    return (await this.records()).filter((r) => r.finishedAt === undefined);
+  }
+
+  private async records(): Promise<RunRecord[]> {
+    await mkdir(this.dir, { recursive: true });
+    const out: RunRecord[] = [];
+    for (const file of await readdir(this.dir)) {
+      if (!file.endsWith('.run.json')) continue;
+      const record = await readJson<RunRecord>(join(this.dir, file));
+      if (record) out.push(record);
+    }
+    return out;
+  }
+
+  private async journal(runId: string): Promise<JournalEntry[]> {
+    let text: string;
+    try {
+      text = await readFile(this.journalPath(runId), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return (await readJson<JournalEntry[]>(this.legacyJournalPath(runId))) ?? [];
+    }
+    const entries: JournalEntry[] = [];
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        entries.push(JSON.parse(line) as JournalEntry);
+      } catch {
+        // A crash mid-append leaves at most one half-written last line. What
+        // came before it is intact, and that is what the run resumes from.
+        break;
+      }
+    }
+    return entries;
+  }
+}
+
+export class FileActivationStore implements ActivationStore {
+  constructor(private readonly path: string) {}
+
+  private async read(): Promise<Record<string, { activatedAt: number }>> {
+    return (await readJson<Record<string, { activatedAt: number }>>(this.path)) ?? {};
+  }
+
+  async isActive(workflowId: string): Promise<boolean> {
+    return (await this.activatedAt(workflowId)) !== undefined;
+  }
+
+  async activatedAt(workflowId: string): Promise<number | undefined> {
+    return (await this.read())[workflowId]?.activatedAt;
+  }
+
+  async set(workflowId: string, active: boolean, at = Date.now()): Promise<void> {
+    assertSafeId(workflowId);
+    const all = await this.read();
+    if (active) all[workflowId] = { activatedAt: all[workflowId]?.activatedAt ?? at };
+    else delete all[workflowId];
+    await mkdir(dirname(this.path), { recursive: true });
+    await writeJson(this.path, all);
+  }
+
+  async list(): Promise<string[]> {
+    return Object.keys(await this.read());
   }
 }

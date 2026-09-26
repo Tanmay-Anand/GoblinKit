@@ -18,7 +18,7 @@ import { MapRegistry, type WorkflowDocument } from '@goblin/spec';
 
 import { LOCAL_TENANT } from './protocol.js';
 import { createApi } from './server.js';
-import { FileRunStore, FileWorkflowStore, type WorkflowStore } from './stores.js';
+import { FileActivationStore, FileRunStore, FileWorkflowStore, type WorkflowStore } from './stores.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const port = Number(process.env['GOBLIN_PORT'] ?? 8787);
@@ -27,12 +27,15 @@ const webDist = join(repo, 'apps', 'web', 'dist');
 
 const workflows = new FileWorkflowStore(join(workspace, 'workflows'));
 const runStore = new FileRunStore(join(workspace, 'runs'));
+const activations = new FileActivationStore(join(workspace, 'activations.json'));
 
 await seed(workflows);
 
-const { server, runs } = createApi({
+const { server, runs, triggers } = createApi({
   workflows,
   runs: runStore,
+  activations,
+  hooksBase: `http://127.0.0.1:${port}`,
   registry: new MapRegistry(coreManifests),
   manifests: coreManifests,
   nodes: coreNodes,
@@ -40,14 +43,22 @@ const { server, runs } = createApi({
   allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
 });
 
+// Runs that were under way when GoblinKit last stopped carry on from their
+// journals; then switched-on workflows start listening and ticking again.
+const resumed = await runs.resumeUnfinished();
+await triggers.start();
+
 server.listen(port, '127.0.0.1', () => {
   console.log(`GoblinKit local server on http://127.0.0.1:${port}  (workspace: ${workspace})`);
+  if (resumed.length) console.log(`Resumed ${resumed.length} run${resumed.length === 1 ? '' : 's'} left unfinished last time.`);
 });
 
 const shutdown = () => {
+  triggers.stop();
   server.close();
-  // Let runs in flight write their journals before exiting; give up after 5s.
-  void Promise.race([runs.settle(), new Promise((r) => setTimeout(r, 5000))]).then(() => process.exit(0));
+  // No need to wait for runs to finish: every step is already on disk, and
+  // they resume on the next start. A moment lets the last appends land.
+  setTimeout(() => process.exit(0), 300);
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

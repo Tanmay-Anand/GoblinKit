@@ -94,3 +94,5 @@ button { font: inherit; }
   .gk-home-row { grid-template-columns: minmax(0, 1fr) auto; }
   .gk-home-row .gk-home-meta { display: none; }
 }
+
+.gk-home-active { margin-left: 8px; font: 700 10px/1 inherit; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: #2b9566; padding: 3px 6px; border-radius: 3px; vertical-align: 2px; }

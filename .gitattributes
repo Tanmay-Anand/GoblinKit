@@ -1,0 +1,4 @@
+# Windows scripts keep Windows line endings on every checkout: cmd.exe can
+# misread a .cmd file with Unix endings.
+*.cmd text eol=crlf
+*.bat text eol=crlf

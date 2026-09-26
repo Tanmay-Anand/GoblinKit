@@ -272,4 +272,18 @@ export interface ConfigField {
   default?: JsonValue;
   options?: string[];
   description?: string;
+  /**
+   * Show (and require) this field only while another field has one of these
+   * values — the cron box only when "Repeat" is set to cron. Data, so the
+   * settings panel and the validator agree without knowing the box.
+   */
+  showWhen?: { field: string; equals: string[] };
+}
+
+/** Whether a field applies, given the box's current settings (defaults filled in). */
+export function fieldApplies(field: ConfigField, config: Record<string, JsonValue | undefined>, fields: ConfigField[]): boolean {
+  if (!field.showWhen) return true;
+  const other = fields.find((f) => f.name === field.showWhen!.field);
+  const value = config[field.showWhen.field] ?? other?.default;
+  return typeof value === 'string' && field.showWhen.equals.includes(value);
 }

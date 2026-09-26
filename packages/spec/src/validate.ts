@@ -1,3 +1,4 @@
+import { fieldApplies } from './types.js';
 import type {
   Diagnostic,
   NodeManifest,
@@ -188,8 +189,9 @@ export function validateDocument(
   doc.nodes.forEach((node, index) => {
     const manifest = nodeById.get(node.id)?.manifest;
     if (!manifest || node.disabled) return;
-    for (const field of manifest.config?.fields ?? []) {
-      if (!field.required) continue;
+    const fields = manifest.config?.fields ?? [];
+    for (const field of fields) {
+      if (!field.required || !fieldApplies(field, node.config, fields)) continue;
       const value = node.config[field.name] ?? field.default;
       if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
         out.push({

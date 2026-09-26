@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 
-import type { ConfigField, Envelope, JsonValue, NodeInstance, NodePolicy, OnErrorBehaviour } from '@goblin/spec';
+import { fieldApplies, type ConfigField, type Envelope, type JsonValue, type NodeInstance, type NodePolicy, type OnErrorBehaviour } from '@goblin/spec';
+
+import type { TriggerStatus } from '@goblin/api/protocol';
 
 import type { NodePatch } from '../document/commands.js';
 import { describeType, portLabel } from '../describe.js';
 import { rotationOf, SIDE_LABEL, sidesFor } from '../rotation.js';
+import { lowerFirst } from './text.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
@@ -22,6 +25,8 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
   const registry = useEditor((s) => s.registry);
   const problems = useEditor((s) => s.problems.nodes[nodeId]);
   const run = useEditor((s) => s.run.projection.boxes[nodeId]);
+  const trigger = useEditor((s) => s.triggers[nodeId]);
+  const active = useEditor((s) => s.activation?.active === true);
 
   if (!node) return null;
   const manifest = registry.get(node.type, node.typeVersion);
@@ -90,7 +95,9 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
 
             {manifest?.description ? <p className="gk-help">{manifest.description}</p> : null}
 
-            {(manifest?.config?.fields ?? []).map((field) => (
+            {trigger ? <TriggerInfo trigger={trigger} active={active} /> : null}
+
+            {(manifest?.config?.fields ?? []).filter((f, _i, all) => fieldApplies(f, node.config, all)).map((field) => (
               <Field key={field.name} nodeId={nodeId} field={field} value={node.config[field.name]} onChange={(v) => setConfig(field.name, v)} />
             ))}
             {!manifest?.config?.fields?.length ? <p className="gk-help">This box has nothing to set up.</p> : null}
@@ -172,6 +179,54 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
       </div>
     </aside>
   );
+}
+
+/** Where a Schedule or Webhook box stands: its URL to copy, or its next run. */
+function TriggerInfo({ trigger, active }: { trigger: TriggerStatus; active: boolean }) {
+  const [copied, setCopied] = useState(false);
+  if (trigger.kind === 'webhook' && trigger.url) {
+    const copy = async () => {
+      try {
+        await navigator.clipboard.writeText(trigger.url!);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        // No clipboard access: select the text so Ctrl+C copies it.
+        document.getElementById(`gk-hook-url-${trigger.nodeId}`)?.focus();
+      }
+    };
+    return (
+      <div className="gk-field">
+        <label className="gk-field-label" htmlFor={`gk-hook-url-${trigger.nodeId}`}>
+          URL to call
+        </label>
+        <span className="gk-inline gk-copy-row">
+          <input id={`gk-hook-url-${trigger.nodeId}`} className="gk-mono" readOnly value={trigger.url} onFocus={(e) => e.target.select()} />
+          <button type="button" className="gk-btn-outline" onClick={() => void copy()}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </span>
+        <span className="gk-field-hint">
+          {active
+            ? `Listening for ${lowerFirst(trigger.description)} from programs on this computer.`
+            : 'Answers only while the workflow is active. Press Activate to switch it on.'}
+        </span>
+      </div>
+    );
+  }
+  if (trigger.kind === 'schedule') {
+    return (
+      <p className={`gk-trigger-note${trigger.problem ? ' is-problem' : ''}`}>
+        {trigger.problem
+          ? trigger.problem
+          : active && trigger.nextRunAt
+            ? `Next run: ${new Date(trigger.nextRunAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+            : `${trigger.description}, once the workflow is active.`}
+        {trigger.lastError ? <span className="gk-trigger-error"> {trigger.lastError}</span> : null}
+      </p>
+    );
+  }
+  return null;
 }
 
 function Field({

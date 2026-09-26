@@ -11,9 +11,18 @@
       "@goblin/expressions": ["packages/expressions/src/index.ts"],
       "@goblin/runtime": ["packages/runtime/src/index.ts"],
       "@goblin/editor": ["packages/editor/src/index.ts"],
+      "@goblin/nodes-core": ["packages/nodes-core/src/index.ts"],
+      "@goblin/node-sdk": ["packages/node-sdk/src/index.ts"],
       "@goblin/api/protocol": ["apps/api/src/protocol.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "../../packages/editor/src/**/*.ts", "../../packages/editor/src/**/*.tsx", "vite.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../packages/editor/src/**/*.ts",
+    "../../packages/editor/src/**/*.tsx",
+    "../../packages/editor/test/**/*.ts",
+    "vite.config.ts"
+  ],
   "exclude": []
 }

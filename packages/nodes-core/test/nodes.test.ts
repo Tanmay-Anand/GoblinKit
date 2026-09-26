@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeFailure, runNode } from '@goblin/node-sdk';
 import { MapRegistry, type WorkflowDocument } from '@goblin/spec';
 import { runWorkflow } from '@goblin/drivers-inprocess';
+import type { JournalEntry } from '@goblin/runtime';
 import { coreManifests, coreNodes } from '@goblin/nodes-core';
 import { checkNodePack } from '@goblin/testing';
 
@@ -157,6 +158,69 @@ describe('the in-process driver', () => {
     // this also checks the engine really does handle it rather than dispatching.
     const result = await runWorkflow({ document: broken, registry, nodes: coreNodes, runId: 'run-2' });
     expect(result.state.status).toBe('succeeded');
+  });
+
+  describe('picking a run back up after the app stopped', () => {
+    // Start → Wait 3 days → Set. A journal cut off at some point is what the
+    // disk holds after GoblinKit was closed there.
+    const waiting: WorkflowDocument = {
+      ...document,
+      nodes: [
+        { id: 'trigger', type: 'core.trigger.manual', typeVersion: 1, config: {} },
+        { id: 'pause', type: 'core.wait', typeVersion: 1, config: { ms: 3 * 24 * 3600 * 1000 } },
+        {
+          id: 'shape',
+          type: 'core.transform.set',
+          typeVersion: 1,
+          config: { values: { message: '{{ $vars.greeting }} {{ $json.name }}' }, keepInput: false },
+          policy: { retry: { maxAttempts: 2, backoffMs: 10, maxBackoffMs: 10 } },
+        },
+      ],
+      edges: [
+        { id: 'e1', from: { node: 'trigger', port: 'main' }, to: { node: 'pause', port: 'main' } },
+        { id: 'e2', from: { node: 'pause', port: 'main' }, to: { node: 'shape', port: 'main' } },
+      ],
+    };
+    const input = { items: [{ data: { name: 'world' } }] };
+    const full = async () =>
+      (await runWorkflow({ document: waiting, registry, nodes: coreNodes, input, runId: 'r', realTimers: false, clock: () => 1_000 })).journal;
+    const cutAfter = (journal: JournalEntry[], match: (e: JournalEntry) => boolean) => journal.slice(0, journal.findIndex(match) + 1);
+
+    it('a three-day Wait is still due at the end of the third day', async () => {
+      const journal = cutAfter(await full(), (e) => e.kind === 'TimerScheduled');
+      const timer = journal.find((e) => e.kind === 'TimerScheduled')!;
+      expect(timer.kind === 'TimerScheduled' && timer.timer.fireAt).toBe(1_000 + 3 * 24 * 3600 * 1000);
+
+      const resumed = await runWorkflow({ document: waiting, registry, nodes: coreNodes, runId: 'r', resume: { journal }, realTimers: false, clock: () => 2_000 });
+      expect(resumed.state.status).toBe('succeeded');
+      expect(resumed.state.output?.items[0]?.data).toEqual({ message: 'hello world' });
+      // The resumed journal continues the old one, rather than starting over.
+      expect(resumed.journal.filter((e) => e.kind === 'RunStarted')).toHaveLength(1);
+    });
+
+    it('a box that was mid-run is retried under its own retry setting', async () => {
+      const journal = cutAfter(await full(), (e) => e.kind === 'NodeRunStarted' && e.nodeId === 'shape');
+      const resumed = await runWorkflow({ document: waiting, registry, nodes: coreNodes, runId: 'r', resume: { journal }, realTimers: false, clock: () => 2_000 });
+
+      const failure = resumed.journal.find((e) => e.kind === 'NodeRunFailed');
+      expect(failure?.kind === 'NodeRunFailed' && failure.error.code).toBe('INTERRUPTED');
+      expect(resumed.state.status).toBe('succeeded');
+    });
+
+    it('with no retries left, the interrupted box fails the run and says why', async () => {
+      const once = { ...waiting, nodes: waiting.nodes.map((n) => (n.id === 'shape' ? { ...n, policy: {} } : n)) };
+      const all = (await runWorkflow({ document: once, registry, nodes: coreNodes, input, runId: 'r', realTimers: false, clock: () => 1_000 })).journal;
+      const journal = cutAfter(all, (e) => e.kind === 'NodeRunStarted' && e.nodeId === 'shape');
+      const resumed = await runWorkflow({ document: once, registry, nodes: coreNodes, runId: 'r', resume: { journal }, realTimers: false, clock: () => 2_000 });
+      expect(resumed.state.status).toBe('failed');
+      expect(resumed.state.error?.message).toMatch(/GoblinKit stopped while this box was running/);
+    });
+
+    it('a run that had already finished is left alone', async () => {
+      const journal = await full();
+      const resumed = await runWorkflow({ document: waiting, registry, nodes: coreNodes, runId: 'r', resume: { journal }, realTimers: false });
+      expect(resumed.journal).toHaveLength(journal.length);
+    });
   });
 
   it('gives identical runs identical ids, so journals diff cleanly', async () => {
