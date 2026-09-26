@@ -44,7 +44,12 @@ export type Command =
   | { kind: 'EmitMetric'; name: string; value: number; tags?: Record<string, string> };
 
 export type RunEvent =
-  | { kind: 'RunStarted'; trigger: Envelope }
+  /**
+   * `triggerNode` names the trigger that fired. Absent, every trigger starts
+   * (the CLI's "run this document"); present, only that one does, and the
+   * others are skipped along with anything only they feed.
+   */
+  | { kind: 'RunStarted'; trigger: Envelope; triggerNode?: NodeId }
   | { kind: 'NodeSucceeded'; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope> }
   | { kind: 'NodeFailed'; nodeRunId: NodeRunId; error: NodeError }
   | { kind: 'TimerFired'; timerId: TimerId }

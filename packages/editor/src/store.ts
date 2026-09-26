@@ -20,7 +20,7 @@ import {
   type WorkflowDocument,
   type XY,
 } from '@goblin/spec';
-import type { LogLine, RunDetail, RunRecord, RunStreamMessage } from '@goblin/api/protocol';
+import type { ActivationStatus, LogLine, RunDetail, RunRecord, RunStreamMessage, TriggerStatus } from '@goblin/api/protocol';
 
 import { applyCommand, newEdgeId, newNodeId, type DocumentCommand } from './document/commands.js';
 import { History } from './document/history.js';
@@ -37,6 +37,9 @@ export interface EditorBackend {
   follow(runId: string, onMessage: (message: RunStreamMessage) => void): () => void;
   listRuns(workflowId: string): Promise<RunRecord[]>;
   getRun(runId: string): Promise<RunDetail>;
+  getActivation(workflowId: string): Promise<ActivationStatus>;
+  /** Rejects with the reason when switching on is refused. */
+  setActive(workflowId: string, active: boolean): Promise<ActivationStatus>;
 }
 
 export class RunRefused extends Error {
@@ -83,6 +86,11 @@ export interface EditorState {
   run: RunSlice;
   history: RunRecord[];
   toast?: Toast;
+  /** Whether the workflow starts by itself, and its Schedule / Webhook boxes' state. From the server. */
+  activation?: ActivationStatus;
+  /** Per box id, for the boxes that start the workflow by themselves. */
+  triggers: Readonly<Record<string, TriggerStatus>>;
+  switching: boolean;
 
   /** Nodes by id, so a box finds itself without scanning the list (§15.3, rule 2). */
   byId: Readonly<Record<string, NodeInstance>>;
@@ -103,6 +111,8 @@ export interface EditorState {
   refreshHistory(): Promise<void>;
   flushSave(): Promise<void>;
   notify(tone: Toast['tone'], text: string): void;
+  refreshActivation(): Promise<void>;
+  setActive(active: boolean): Promise<void>;
 }
 
 export type EditorStore = StoreApi<EditorState>;
@@ -182,6 +192,8 @@ export function createEditorStore(args: {
       canRedo: false,
       run: { projection: idleProjection, logs: [], starting: false, historical: false },
       history: [],
+      triggers: {},
+      switching: false,
 
       dispatch(cmd, coalesceKey) {
         const before = get().doc;
@@ -340,6 +352,8 @@ export function createEditorStore(args: {
             // Only "saved" if nothing changed while the request was out.
             if (get().doc === doc) set({ save: { state: 'saved' } });
             else set({ save: { state: 'unsaved' } });
+            // A new Webhook box gets its URL, a changed schedule its next time.
+            void get().refreshActivation();
           })
           .catch((error: unknown) => {
             set({ save: { state: 'error', message: error instanceof Error ? error.message : String(error) } });
@@ -353,6 +367,33 @@ export function createEditorStore(args: {
 
       notify(tone, text) {
         set({ toast: { id: ++toastSeq, tone, text } });
+      },
+
+      async refreshActivation() {
+        try {
+          const activation = await args.backend.getActivation(get().doc.id);
+          set({ activation, triggers: Object.fromEntries(activation.triggers.map((t) => [t.nodeId, t])) });
+        } catch {
+          // Status is a convenience; editing carries on without it.
+        }
+      },
+
+      async setActive(active) {
+        // Switch on what is on screen, not the last autosave.
+        await get().flushSave();
+        set({ switching: true });
+        try {
+          const activation = await args.backend.setActive(get().doc.id, active);
+          set({ activation, triggers: Object.fromEntries(activation.triggers.map((t) => [t.nodeId, t])) });
+          get().notify(
+            'success',
+            active ? 'Active: this workflow now starts by itself while GoblinKit is open.' : 'Switched off. It runs only when you press Run.',
+          );
+        } catch (error) {
+          get().notify('error', error instanceof Error ? error.message : String(error));
+        } finally {
+          set({ switching: false });
+        }
       },
     };
   });

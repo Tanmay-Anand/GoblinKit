@@ -7,7 +7,7 @@
 
 import { RunRefused, type EditorBackend } from '@goblin/editor';
 import type { NodeManifest, WorkflowDocument } from '@goblin/spec';
-import type { ApiError, RunDetail, RunRecord, RunStreamMessage, WorkflowSummary } from '@goblin/api/protocol';
+import type { ActivationStatus, ApiError, RunDetail, RunRecord, RunStreamMessage, WorkflowSummary } from '@goblin/api/protocol';
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
@@ -42,6 +42,9 @@ export const backend: EditorBackend = {
   startRun: (doc) => call<RunRecord>(`/workflows/${encodeURIComponent(doc.id)}/runs`, send('POST', { document: doc })),
   listRuns: (workflowId) => call<RunRecord[]>(`/workflows/${encodeURIComponent(workflowId)}/runs`),
   getRun: (runId) => call<RunDetail>(`/runs/${encodeURIComponent(runId)}`),
+  getActivation: (workflowId) => call<ActivationStatus>(`/workflows/${encodeURIComponent(workflowId)}/activation`),
+  setActive: (workflowId, active) =>
+    call<ActivationStatus>(`/workflows/${encodeURIComponent(workflowId)}/activation`, send('PUT', { active })),
 
   follow(runId, onMessage) {
     const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);

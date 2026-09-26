@@ -48,14 +48,18 @@ function ctxFor(document: WorkflowDocument, now = 1_000) {
 function drive(
   document: WorkflowDocument,
   answer: (nodeId: string, scopePath: string, attempt: number) => RunEvent | 'fail-run',
-  options: { input?: Envelope; maxSteps?: number; now?: () => number } = {},
+  options: { input?: Envelope; maxSteps?: number; now?: () => number; triggerNode?: string } = {},
 ): { state: RunState; commands: Command[]; log: string[] } {
   const ctx = ctxFor(document);
   let state = initialState('run1');
   const commands: Command[] = [];
   const log: string[] = [];
   const pending: RunEvent[] = [
-    { kind: 'RunStarted', trigger: options.input ?? { items: [{ data: { n: 1 } }] } },
+    {
+      kind: 'RunStarted',
+      trigger: options.input ?? { items: [{ data: { n: 1 } }] },
+      ...(options.triggerNode ? { triggerNode: options.triggerNode } : {}),
+    },
   ];
   const timers = new Map<string, number>();
 
@@ -99,6 +103,40 @@ const ok = (outputs: Record<string, Envelope>): RunEvent =>
 
 const main = (...data: unknown[]): Record<string, Envelope> => ({
   main: { items: data.map((d) => ({ data: d as never })) },
+});
+
+describe('a workflow with more than one trigger', () => {
+  // A schedule and a manual start both feed a Merge; each also has a box of its own.
+  const document = doc(
+    [
+      node('manual', 'core.trigger.manual'),
+      node('timer', 'core.trigger.schedule', { repeat: 'minutes', every: 5 }),
+      node('byHand', 'core.log'),
+      node('onTimer', 'core.log'),
+      node('merge', 'core.control.merge'),
+      node('after', 'core.log'),
+    ],
+    [
+      edge('e1', 'manual', 'main', 'byHand'),
+      edge('e2', 'timer', 'main', 'onTimer'),
+      edge('e3', 'byHand', 'main', 'merge', 'a'),
+      edge('e4', 'onTimer', 'main', 'merge', 'b'),
+      edge('e5', 'merge', 'main', 'after'),
+    ],
+  );
+
+  it('starts only the trigger that fired, and skips what only the others feed', () => {
+    const { state, log } = drive(document, (id) => ok(main({ from: id })), { triggerNode: 'timer' });
+
+    expect(log).toEqual(['invoke timer', 'invoke onTimer', 'invoke merge', 'invoke after']);
+    expect(state.status).toBe('succeeded');
+    expect(state.edges['e1#']).toEqual({ status: 'pruned', reason: 'manual emitted nothing on port main' });
+  });
+
+  it('without a named trigger, starts every one — as the CLI always has', () => {
+    const { log } = drive(document, (id) => ok(main({ from: id })));
+    expect(log.slice(0, 2)).toEqual(['invoke manual', 'invoke timer']);
+  });
 });
 
 describe('branching by pruning', () => {

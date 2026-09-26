@@ -1122,7 +1122,17 @@ Stages 1–2 are **done**. Stages 3–6 are the single-user product. Stages 7–
 - Save, open, rename and delete workflows, with a list of past runs per workflow.
 - *Deliverable:* build `examples/order-triage.json` from an empty canvas, press Run, watch it light up, then reopen it tomorrow and find it and its runs still there. `pnpm dev` starts everything.
 
-**Stage 4 — Boxes that start by themselves.** Schedule and Webhook triggers, plus an **Active** switch per workflow. The local API gains a scheduler and a `localhost` webhook URL per workflow. Runs must now survive closing the app, so this stage brings the part of durability a single machine needs. The journal is appended to disk entry by entry, and on startup the API folds unfinished journals and resumes them (§7.4). A Wait of three days outlives a restart. Automatic runs happen only while the app is running. That limit is stated in the UI, not hidden.
+**Stage 4 — Boxes that start by themselves.** *Done.* Decisions made while building it:
+
+- A run names the trigger that fired (`RunStarted.triggerNode`). The others are skipped like an untaken branch, so a workflow with both a Manual and a Schedule box runs only one side.
+- Journals are append-only NDJSON, one batch per decision. A crash leaves at most one half-written last line, which the reader stops at.
+- On resume, a box that was mid-run becomes a retryable `INTERRUPTED` failure: its own retry setting decides whether it runs again, with its idempotency key unchanged. Timers re-arm for the time they were always due. Each run keeps a snapshot of the workflow it started with, and resumes with that.
+- Missed schedules are not made up: a machine that slept through several fires the one that came due, then carries on from now. A schedule due while the saved workflow has problems is skipped, and the canvas says so.
+- Webhooks answer only while the workflow is active, refuse requests carrying another site's Origin (as `/api` does), and keep `authorization` and `cookie` out of the recorded run.
+
+The plan as written:
+
+Schedule and Webhook triggers, plus an **Active** switch per workflow. The local API gains a scheduler and a `localhost` webhook URL per workflow. Runs must now survive closing the app, so this stage brings the part of durability a single machine needs. The journal is appended to disk entry by entry, and on startup the API folds unfinished journals and resumes them (§7.4). A Wait of three days outlives a restart. Automatic runs happen only while the app is running. That limit is stated in the UI, not hidden.
 
 **Stage 5 — Power boxes and a better run view.** Code (QuickJS-WASM with fuel limits, §13.2, the real sandbox it has waited for), Sub-workflow, and an **AI step**: a box that calls a language model to summarize, classify, extract or generate, with the provider behind a port. The expression editor gains autocomplete from real upstream data (§15.4). Pinned data, re-run from a failed box, journal scrubbing, and "copy as failing test case" arrive here (§15.5).
 

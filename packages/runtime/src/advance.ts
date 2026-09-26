@@ -32,7 +32,7 @@ export function advance(state: RunState, event: RunEvent, ctx: SchedulerContext)
 
   switch (event.kind) {
     case 'RunStarted':
-      pass.startRun(event.trigger);
+      pass.startRun(event.trigger, event.triggerNode);
       break;
     case 'NodeSucceeded':
       pass.nodeSucceeded(event.nodeRunId, event.outputs);
@@ -106,11 +106,19 @@ class Pass {
    * Events
    * -------------------------------------------------------------------- */
 
-  startRun(trigger: Envelope): void {
-    this.emit({ kind: 'RunStarted', at: this.now, trigger });
+  startRun(trigger: Envelope, triggerNode?: NodeId): void {
+    this.emit({ kind: 'RunStarted', at: this.now, trigger, ...(triggerNode ? { triggerNode } : {}) });
     for (const triggerId of this.ctx.graph.triggers) {
       const node = this.node(triggerId);
       if (!node) continue;
+      if (triggerNode && triggerId !== triggerNode) {
+        // A trigger that did not fire is skipped like an untaken branch: its
+        // wires are pruned, so what only it feeds is skipped too, and a Merge
+        // fed by both still runs with whatever the firing trigger produced.
+        this.emit({ kind: 'NodeRunSkipped', at: this.now, nodeId: triggerId, scopePath: '', reason: 'a different trigger started this run' });
+        this.distribute(node, '', {});
+        continue;
+      }
       this.invoke(node, '', { main: trigger }, 1);
     }
   }

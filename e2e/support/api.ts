@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, type APIRequestContext } from '@playwright/test';
 
-import type { RunRecord } from '../../apps/api/src/protocol.js';
+import type { ActivationStatus, RunRecord } from '../../apps/api/src/protocol.js';
 import type { WorkflowDocument } from '../../packages/spec/src/index.js';
 
 /**
@@ -61,12 +61,24 @@ export class GoblinApi {
     return (await this.runs(workflowId)).find((r) => r.runId === runId)!;
   }
 
+  async activation(workflowId: string): Promise<ActivationStatus> {
+    const res = await this.request.get(`/api/workflows/${workflowId}/activation`);
+    expect(res.status()).toBe(200);
+    return (await res.json()) as ActivationStatus;
+  }
+
+  /** Call a webhook the way another program on this machine would: straight at the server. */
+  async callHook(url: string, body: unknown): Promise<{ status: number; body: unknown }> {
+    const res = await this.request.post(url, { data: body });
+    return { status: res.status(), body: await res.json() };
+  }
+
   /** Clean up a workflow the test created through the UI rather than through here. */
   adopt(workflowId: string): void {
     this.created.push(workflowId);
   }
 
-  /** Delete everything this test created. Called by the fixture after each test. */
+  /** Delete everything this test created (which also switches it off). Called by the fixture after each test. */
   async cleanUp(): Promise<void> {
     for (const id of this.created) await this.request.delete(`/api/workflows/${id}`);
   }

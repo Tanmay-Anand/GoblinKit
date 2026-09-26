@@ -8,7 +8,7 @@
 
 import type { JsonValue, NodeInstance, NodeManifest } from '@goblin/spec';
 
-export type Glyph = 'play' | 'branch' | 'switch' | 'merge' | 'set' | 'globe' | 'note' | 'loop' | 'repeat' | 'stop' | 'clock' | 'box';
+export type Glyph = 'hook' | 'play' | 'branch' | 'switch' | 'merge' | 'set' | 'globe' | 'note' | 'loop' | 'repeat' | 'stop' | 'clock' | 'box';
 
 export interface Category {
   id: string;
@@ -29,6 +29,8 @@ export const CATEGORIES: Record<string, Category> = {
 
 const BY_TYPE: Record<string, { category: string; glyph: Glyph }> = {
   'core.trigger.manual': { category: 'start', glyph: 'play' },
+  'core.trigger.schedule': { category: 'start', glyph: 'clock' },
+  'core.trigger.webhook': { category: 'start', glyph: 'hook' },
   'core.control.if': { category: 'logic', glyph: 'branch' },
   'core.control.switch': { category: 'logic', glyph: 'switch' },
   'core.control.merge': { category: 'logic', glyph: 'merge' },
@@ -50,8 +52,6 @@ export function describeType(manifest: NodeManifest): { category: Category; glyp
 
 /** Boxes the plan adds later, shown in the palette so the road ahead is visible. */
 export const COMING: { title: string; stage: number; category: string; glyph: Glyph; blurb: string }[] = [
-  { title: 'Schedule', stage: 4, category: 'start', glyph: 'clock', blurb: 'Start on a timer' },
-  { title: 'Webhook', stage: 4, category: 'start', glyph: 'globe', blurb: 'Start when a URL is called' },
   { title: 'Code', stage: 5, category: 'data', glyph: 'set', blurb: 'Run your own JavaScript, sandboxed' },
   { title: 'Sub-workflow', stage: 5, category: 'actions', glyph: 'box', blurb: 'Run another workflow as one step' },
   { title: 'AI step', stage: 5, category: 'actions', glyph: 'note', blurb: 'Summarize, classify or write with a model' },
@@ -61,12 +61,17 @@ export const COMING: { title: string; stage: number; category: string; glyph: Gl
 ];
 
 /** A short line of what this box is set to do, shown under its name. */
-export function summarize(node: NodeInstance, manifest: NodeManifest | undefined): string {
+export function summarize(node: NodeInstance, manifest: NodeManifest | undefined, trigger?: { description: string }): string {
   const c = node.config;
   const str = (v: JsonValue | undefined) => (typeof v === 'string' ? v : v === undefined ? '' : JSON.stringify(v));
   switch (node.type) {
     case 'core.trigger.manual':
       return 'Starts when you press Run';
+    case 'core.trigger.schedule':
+      // The server's wording, when known: it owns what a schedule means.
+      return trigger?.description ?? 'On a timer';
+    case 'core.trigger.webhook':
+      return trigger?.description ? `Starts on ${trigger.description} to its URL` : 'Starts when its URL is called';
     case 'core.http.request':
       return c['url'] ? `${str(c['method']) || 'GET'} ${str(c['url'])}` : 'No address yet';
     case 'core.control.if':

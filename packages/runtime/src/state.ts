@@ -116,7 +116,7 @@ export interface AwaitedSignal {
  * ------------------------------------------------------------------------ */
 
 export type JournalEntry =
-  | { kind: 'RunStarted'; at: number; trigger: Envelope }
+  | { kind: 'RunStarted'; at: number; trigger: Envelope; triggerNode?: NodeId }
   | { kind: 'NodeRunStarted'; at: number; nodeRunId: NodeRunId; nodeId: NodeId; scopePath: ScopePath; attempt: number }
   | { kind: 'NodeRunSucceeded'; at: number; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope> }
   | { kind: 'NodeRunFailed'; at: number; nodeRunId: NodeRunId; error: NodeError }
