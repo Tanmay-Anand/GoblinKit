@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="488" viewBox="0 0 760 488" role="img" aria-label="BM-1496: before and after" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<title>BM-1496: before and after</title>
+<rect width="760" height="488" fill="#ffffff"/>
+<text x="16" y="30" font-size="18" font-weight="700" fill="#1f2933">BM-1496: before and after</text>
+<text x="16" y="50" font-size="12" fill="#667085">https://dev.example.com · 3 pairs</text>
+<rect x="16" y="62" width="12" height="12" rx="2" fill="#c3cad5"/>
+<text x="33" y="72" font-size="12" fill="#667085">before</text>
+<rect x="85.6" y="62" width="12" height="12" rx="2" fill="#2f9e5b"/>
+<text x="102.6" y="72" font-size="12" fill="#667085">after: better</text>
+<rect x="201.39999999999998" y="62" width="12" height="12" rx="2" fill="#d64545"/>
+<text x="218.39999999999998" y="72" font-size="12" fill="#667085">after: worse</text>
+<rect x="310.59999999999997" y="62" width="12" height="12" rx="2" fill="#8a96a8"/>
+<text x="327.59999999999997" y="72" font-size="12" fill="#667085">after: about the same</text>
+<text x="16" y="104" font-size="14" font-weight="600" fill="#1f2933">Median response time</text>
+<line x1="16" y1="118" x2="744" y2="118" stroke="#e4e7ec"/>
+<text x="16" y="138" font-size="13" font-weight="600" fill="#1f2933">cancellations</text>
+<text x="16" y="155" font-size="12" fill="#667085">full → list</text>
+<rect x="220" y="126" width="49" height="14" rx="2" fill="#c3cad5"/>
+<text x="275" y="137" font-size="11.5" fill="#667085">full 31.5 ms</text>
+<rect x="220" y="144" width="30" height="14" rx="2" fill="#2f9e5b"/>
+<text x="256" y="155" font-size="11.5" fill="#1f2933">list 19.2 ms</text>
+<text x="744" y="147" font-size="12.5" font-weight="600" text-anchor="end" fill="#2f9e5b">39.0% faster</text>
+<line x1="16" y1="168" x2="744" y2="168" stroke="#e4e7ec"/>
+<text x="16" y="188" font-size="13" font-weight="600" fill="#1f2933">projects</text>
+<text x="16" y="205" font-size="12" fill="#667085">old → new</text>
+<rect x="220" y="176" width="330" height="14" rx="2" fill="#c3cad5"/>
+<text x="556" y="187" font-size="11.5" fill="#667085">old 212.4 ms</text>
+<rect x="220" y="194" width="59" height="14" rx="2" fill="#2f9e5b"/>
+<text x="285" y="205" font-size="11.5" fill="#1f2933">new 38.1 ms</text>
+<text x="744" y="197" font-size="12.5" font-weight="600" text-anchor="end" fill="#2f9e5b">82.1% faster</text>
+<line x1="16" y1="218" x2="744" y2="218" stroke="#e4e7ec"/>
+<text x="16" y="238" font-size="13" font-weight="600" fill="#1f2933">users</text>
+<text x="16" y="255" font-size="12" fill="#667085">old → new</text>
+<rect x="220" y="226" width="23" height="14" rx="2" fill="#c3cad5"/>
+<text x="249" y="237" font-size="11.5" fill="#667085">old 14.9 ms</text>
+<rect x="220" y="244" width="29" height="14" rx="2" fill="#8a96a8"/>
+<text x="255" y="255" font-size="11.5" fill="#1f2933">new 18.5 ms</text>
+<text x="744" y="247" font-size="12.5" font-weight="600" text-anchor="end" fill="#8a96a8">about the same</text>
+<text x="16" y="300" font-size="14" font-weight="600" fill="#1f2933">Response size</text>
+<line x1="16" y1="314" x2="744" y2="314" stroke="#e4e7ec"/>
+<text x="16" y="334" font-size="13" font-weight="600" fill="#1f2933">cancellations</text>
+<text x="16" y="351" font-size="12" fill="#667085">full → list</text>
+<rect x="220" y="322" width="84" height="14" rx="2" fill="#c3cad5"/>
+<text x="310" y="333" font-size="11.5" fill="#667085">full 12.0 KB</text>
+<rect x="220" y="340" width="9" height="14" rx="2" fill="#2f9e5b"/>
+<text x="235" y="351" font-size="11.5" fill="#1f2933">list 1.3 KB</text>
+<text x="744" y="343" font-size="12.5" font-weight="600" text-anchor="end" fill="#2f9e5b">89.2% smaller</text>
+<line x1="16" y1="364" x2="744" y2="364" stroke="#e4e7ec"/>
+<text x="16" y="384" font-size="13" font-weight="600" fill="#1f2933">projects</text>
+<text x="16" y="401" font-size="12" fill="#667085">old → new</text>
+<rect x="220" y="372" width="330" height="14" rx="2" fill="#c3cad5"/>
+<text x="556" y="383" font-size="11.5" fill="#667085">old 47.1 KB</text>
+<rect x="220" y="390" width="13" height="14" rx="2" fill="#2f9e5b"/>
+<text x="239" y="401" font-size="11.5" fill="#1f2933">new 1.9 KB</text>
+<text x="744" y="393" font-size="12.5" font-weight="600" text-anchor="end" fill="#2f9e5b">96.1% smaller</text>
+<line x1="16" y1="414" x2="744" y2="414" stroke="#e4e7ec"/>
+<text x="16" y="434" font-size="13" font-weight="600" fill="#1f2933">users</text>
+<text x="16" y="451" font-size="12" fill="#667085">old → new</text>
+<rect x="220" y="422" width="2" height="14" rx="2" fill="#c3cad5"/>
+<text x="228" y="433" font-size="11.5" fill="#667085">old 140 B</text>
+<rect x="220" y="440" width="2" height="14" rx="2" fill="#8a96a8"/>
+<text x="228" y="451" font-size="11.5" fill="#1f2933">new 162 B</text>
+<text x="744" y="443" font-size="12.5" font-weight="600" text-anchor="end" fill="#8a96a8">about the same</text>
+</svg>

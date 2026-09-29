@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 
 import type { RunRecord } from '@goblin/api/protocol';
 
+import { FileLinks } from './Files.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
@@ -56,6 +57,7 @@ export function RunsPanel() {
             {p.output?.items.length ? (
               <>
                 <h3 className="gk-subhead">Result · {p.output.items.length} item{p.output.items.length === 1 ? '' : 's'}</h3>
+                <FileLinks envelopes={[p.output]} />
                 <pre className="gk-json gk-json-short">{JSON.stringify(p.output.items.map((i) => i.data), null, 2)}</pre>
               </>
             ) : null}

@@ -5,6 +5,7 @@ import type { NodeManifest, WorkflowDocument } from '@goblin/spec';
 
 import logoUrl from '../../../assets/logo/goblinkit-mark.png';
 import { api, backend } from './api.js';
+import { Credentials } from './Credentials.js';
 import { WorkflowList } from './WorkflowList.js';
 
 // The tab icon is the same transparent mark the rail uses.
@@ -13,8 +14,9 @@ icon.rel = 'icon';
 icon.href = logoUrl;
 document.head.append(icon);
 
-/** `#/` is the workflow list; `#/w/<id>` opens one on the canvas. */
-function readRoute(): { workflowId?: string } {
+/** `#/` is the workflow list; `#/w/<id>` opens one on the canvas; `#/credentials` the credentials. */
+function readRoute(): { workflowId?: string; credentials?: boolean } {
+  if (location.hash.startsWith('#/credentials')) return { credentials: true };
   const match = location.hash.match(/^#\/w\/([A-Za-z0-9_-]+)/);
   return match?.[1] ? { workflowId: match[1] } : {};
 }
@@ -38,7 +40,7 @@ export function App() {
   useEffect(() => {
     setDoc(null);
     if (!route.workflowId) {
-      document.title = 'GoblinKit';
+      document.title = route.credentials ? 'Credentials · GoblinKit' : 'GoblinKit';
       return;
     }
     api.getWorkflow(route.workflowId).then(
@@ -69,6 +71,8 @@ export function App() {
       </div>
     );
   }
+
+  if (route.credentials) return <Credentials logoUrl={logoUrl} onBack={back} />;
 
   if (!manifests) return <div className="gk-app-message">Loading…</div>;
 

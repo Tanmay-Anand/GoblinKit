@@ -11,6 +11,7 @@ import { AddPanel } from './AddPanel.js';
 import { Canvas } from './Canvas.js';
 import { RunsPanel } from './RunsPanel.js';
 import { SettingsPanel } from './SettingsPanel.js';
+import { VariablesPanel } from './VariablesPanel.js';
 import { TopBar } from './TopBar.js';
 import { EditorContext, useEditor, useEditorStore } from './context.js';
 import { Icon } from './icons.js';
@@ -37,6 +38,10 @@ export function Editor(props: EditorProps) {
   useEffect(() => {
     void store.getState().refreshHistory();
     void store.getState().refreshActivation();
+    void store.getState().refreshCredentials();
+    // A credential added or replaced in another tab shows up on coming back.
+    const onFocus = () => void store.getState().refreshCredentials();
+    window.addEventListener('focus', onFocus);
     // While switched on, runs start without anyone pressing Run: keep the
     // history and each schedule's next time current. Cheap, local calls.
     const poll = setInterval(() => {
@@ -54,6 +59,7 @@ export function Editor(props: EditorProps) {
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
       clearInterval(poll);
+      window.removeEventListener('focus', onFocus);
       window.removeEventListener('beforeunload', beforeUnload);
       void store.getState().flushSave();
     };
@@ -109,6 +115,15 @@ function Rail({ logoUrl, onBack }: { logoUrl: string; onBack: () => void }) {
       >
         <Icon name="clock" size={19} />
       </button>
+      <button
+        type="button"
+        className={`gk-rail-btn${panel === 'variables' ? ' is-active' : ''}`}
+        onClick={() => store.getState().openPanel(panel === 'variables' ? null : { kind: 'variables' })}
+        title="Variables"
+        aria-label="Variables"
+      >
+        <Icon name="braces" size={19} />
+      </button>
       <button type="button" className="gk-rail-btn" onClick={() => store.getState().tidy()} title="Tidy up the layout" aria-label="Tidy up the layout">
         <Icon name="layout" size={19} />
       </button>
@@ -126,6 +141,8 @@ function FloatingPanel() {
       return <SettingsPanel nodeId={panel.nodeId} tab={panel.tab} />;
     case 'runs':
       return <RunsPanel />;
+    case 'variables':
+      return <VariablesPanel />;
   }
 }
 

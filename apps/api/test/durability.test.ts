@@ -23,7 +23,10 @@ let workspace: string | undefined;
 
 afterEach(async () => {
   server?.kill();
-  if (workspace) await rm(workspace, { recursive: true, force: true });
+  if (workspace) {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(`${workspace}-key`, { recursive: true, force: true });
+  }
 });
 
 async function freePort(): Promise<number> {
@@ -37,7 +40,8 @@ async function freePort(): Promise<number> {
 async function startServer(port: number, dir: string): Promise<ChildProcess> {
   const child = spawn(process.execPath, [tsx, 'apps/api/src/main.ts'], {
     cwd: repo,
-    env: { ...process.env, GOBLIN_PORT: String(port), GOBLIN_WORKSPACE: dir },
+    // The credentials key goes next to the throwaway workspace, never in your profile.
+    env: { ...process.env, GOBLIN_PORT: String(port), GOBLIN_WORKSPACE: dir, GOBLIN_KEY_FILE: `${dir}-key/master.key` },
     stdio: 'ignore',
   });
   await until(async () => (await fetch(`http://127.0.0.1:${port}/api/health`).catch(() => undefined))?.ok === true, 20_000);

@@ -1,0 +1,30 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "goblinkit",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/dev.mjs"],
+      "port": 5173
+    },
+    {
+      "name": "goblinkit-scratch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/dev.mjs"],
+      "port": 5175,
+      "env": {
+        "GOBLIN_WEB_PORT": "5175",
+        "GOBLIN_API_PORT": "8789",
+        "GOBLIN_WORKSPACE": "C:/Users/RAKSHI~1/AppData/Local/Temp/claude/D--Tanm-Projects-GoblinKit/0885a784-af45-40bb-9d95-e6bca3cb7d9e/scratchpad/workspace",
+        "GOBLIN_KEY_FILE": "C:/Users/RAKSHI~1/AppData/Local/Temp/claude/D--Tanm-Projects-GoblinKit/0885a784-af45-40bb-9d95-e6bca3cb7d9e/scratchpad/profile/master.key",
+        "GOBLIN_NO_BROWSER": "1"
+      }
+    },
+    {
+      "name": "stub-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/RAKSHI~1/AppData/Local/Temp/claude/D--Tanm-Projects-GoblinKit/0885a784-af45-40bb-9d95-e6bca3cb7d9e/scratchpad/stub-api.mjs"],
+      "port": 8090
+    }
+  ]
+}

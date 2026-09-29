@@ -25,6 +25,8 @@ export interface BoxRunView {
   skippedBecause?: string;
   lastInput?: Record<string, Envelope>;
   lastOutput?: Record<string, Envelope>;
+  /** State keys this box could not save: another run changed them first. */
+  stateConflicts?: string[];
 }
 
 export interface WireRunView {
@@ -158,6 +160,11 @@ export function projectEntries(
           counters.retries++;
         }
         break;
+      case 'StateWritesDropped': {
+        const id = runIndex[e.nodeRunId];
+        if (id) boxes[id] = { ...box(id), stateConflicts: e.keys };
+        break;
+      }
       case 'RunStatusChanged':
         status = e.status;
         break;

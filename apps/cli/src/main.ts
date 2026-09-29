@@ -12,7 +12,8 @@ import { readFile } from 'node:fs/promises';
 import { argv, exit, stderr, stdout } from 'node:process';
 
 import { runWorkflow, replay } from '@goblin/drivers-inprocess';
-import { coreManifests, coreNodes } from '@goblin/nodes-core';
+import { benchManifests, benchNodes } from '@goblin/nodes-bench';
+import { coreManifests as core, coreNodes as coreExecutors } from '@goblin/nodes-core';
 import { compile } from '@goblin/graph';
 import {
   MapRegistry,
@@ -25,6 +26,10 @@ import {
 } from '@goblin/spec';
 import type { JournalEntry } from '@goblin/runtime';
 
+// Every pack's boxes. Credentials live with the app's server, not here: a
+// box that needs one fails with a message saying so.
+const coreManifests = [...core, ...benchManifests];
+const coreNodes = [...coreExecutors, ...benchNodes];
 const registry = new MapRegistry(coreManifests);
 
 async function main(): Promise<number> {

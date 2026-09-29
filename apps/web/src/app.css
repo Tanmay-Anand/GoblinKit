@@ -96,3 +96,28 @@ button { font: inherit; }
 }
 
 .gk-home-active { margin-left: 8px; font: 700 10px/1 inherit; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: #2b9566; padding: 3px 6px; border-radius: 3px; vertical-align: 2px; }
+
+/* ------------------------------------------------------------- sections */
+
+.gk-home-nav { margin-left: auto; display: flex; gap: 4px; }
+.gk-home-nav a { padding: 6px 10px; border-radius: 5px; color: #3b4046; font-weight: 600; text-decoration: none; }
+.gk-home-nav a:hover { background: #f2f3f5; }
+.gk-home-nav a[aria-current='page'] { color: #1f8fd6; background: #e7f3fb; }
+
+/* ---------------------------------------------------------- credentials */
+
+.gk-cred-note { margin: 0 0 16px; padding: 10px 12px; border-radius: 5px; background: #fff; border: 1px solid #e0e3e7; color: #3b4046; font-size: 13px; max-width: 80ch; }
+.gk-cred-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+.gk-cred-name { display: grid; gap: 1px; min-width: 0; }
+.gk-cred-warn { font-size: 12px; font-weight: 600; color: #9c5b00; }
+
+.gk-cred-form { display: grid; gap: 12px; max-width: 520px; margin-bottom: 20px; padding: 16px; background: #fff; border: 1px solid #cdd2d8; border-radius: 8px; }
+.gk-cred-form h2 { margin: 0; font-size: 16px; }
+.gk-cred-form p { margin: 0; }
+.gk-cred-field { display: grid; gap: 4px; }
+.gk-cred-field > label { font-size: 12.5px; font-weight: 600; color: #3b4046; }
+.gk-cred-field input, .gk-cred-field select { height: 34px; padding: 0 10px; border: 1px solid #cdd2d8; border-radius: 5px; font: inherit; background: #fff; }
+.gk-cred-field input:focus, .gk-cred-field select:focus { border-color: #1f8fd6; outline: none; box-shadow: 0 0 0 3px #e7f3fb; }
+.gk-cred-field small { color: #677079; font-size: 12px; }
+.gk-cred-actions { display: flex; align-items: center; gap: 8px; }
+.gk-required { margin-left: 2px; color: #cf4545; }

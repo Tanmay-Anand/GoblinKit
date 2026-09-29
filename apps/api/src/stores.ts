@@ -79,7 +79,7 @@ export class StoreError extends Error {
  * flight at once (an autosave and a Run), and a shared temp file would let one
  * overwrite the other's half-written bytes.
  */
-async function writeJson(path: string, value: unknown): Promise<void> {
+export async function writeJson(path: string, value: unknown): Promise<void> {
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
   try {

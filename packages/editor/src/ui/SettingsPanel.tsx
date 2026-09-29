@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 
-import { fieldApplies, type ConfigField, type Envelope, type JsonValue, type NodeInstance, type NodePolicy, type OnErrorBehaviour } from '@goblin/spec';
+import {
+  fieldApplies,
+  type ConfigField,
+  type CredentialSlot,
+  type Envelope,
+  type JsonValue,
+  type NodeInstance,
+  type NodeManifest,
+  type NodePolicy,
+  type OnErrorBehaviour,
+} from '@goblin/spec';
 
 import type { TriggerStatus } from '@goblin/api/protocol';
 
@@ -8,6 +18,7 @@ import type { NodePatch } from '../document/commands.js';
 import { describeType, portLabel } from '../describe.js';
 import { rotationOf, SIDE_LABEL, sidesFor } from '../rotation.js';
 import { lowerFirst } from './text.js';
+import { FileLinks } from './Files.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
@@ -100,7 +111,9 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
             {(manifest?.config?.fields ?? []).filter((f, _i, all) => fieldApplies(f, node.config, all)).map((field) => (
               <Field key={field.name} nodeId={nodeId} field={field} value={node.config[field.name]} onChange={(v) => setConfig(field.name, v)} />
             ))}
-            {!manifest?.config?.fields?.length ? <p className="gk-help">This box has nothing to set up.</p> : null}
+            {!manifest?.config?.fields?.length && !manifest?.credentials?.length ? <p className="gk-help">This box has nothing to set up.</p> : null}
+
+            {manifest?.credentials?.length ? <CredentialSlots node={node} manifest={manifest} onPatch={patch} /> : null}
 
             <div className="gk-field">
               <span className="gk-field-label" id={`gk-facing-${nodeId}`}>
@@ -163,6 +176,13 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
             </div>
           </>
         ) : (
+          <>
+          {tab === 'output' && run?.stateConflicts?.length ? (
+            <p className="gk-trigger-note is-problem" role="note">
+              Not saved: another run changed {run.stateConflicts.join(', ')} first, so this run left them as that run set them.
+            </p>
+          ) : null}
+          {tab === 'output' && manifest?.actions?.length && run?.status === 'succeeded' ? <BoxActions nodeId={nodeId} manifest={manifest} /> : null}
           <DataView
             envelopes={tab === 'input' ? run?.lastInput : run?.lastOutput}
             nodeType={node.type}
@@ -175,9 +195,87 @@ export function SettingsPanel({ nodeId, tab }: { nodeId: string; tab: Tab }) {
             }
             note={run && run.starts > 1 ? `Showing the last of ${run.starts} passes.` : undefined}
           />
+          </>
         )}
       </div>
     </aside>
+  );
+}
+
+/**
+ * Which saved credential the box signs in with, per slot. Only credentials
+ * whose type provides a capability the slot accepts are offered, so a box
+ * can never be given one it cannot use. Values are never here — only names.
+ */
+function CredentialSlots({ node, manifest, onPatch }: { node: NodeInstance; manifest: NodeManifest; onPatch: (p: NodePatch, key: string) => void }) {
+  const credentials = useEditor((s) => s.credentials);
+  const types = useEditor((s) => s.credentialTypes);
+  const provides = (type: string) => types.find((t) => t.type === type)?.provides ?? [];
+  const title = (type: string) => types.find((t) => t.type === type)?.title ?? type;
+
+  const pick = (slot: CredentialSlot, id: string) => {
+    const next = { ...(node.credentials ?? {}) };
+    const chosen = credentials?.find((c) => c.id === id);
+    if (chosen) next[slot.name] = { id: chosen.id, type: chosen.type };
+    else delete next[slot.name];
+    onPatch({ credentials: Object.keys(next).length ? next : undefined }, `credentials.${slot.name}`);
+  };
+
+  return (
+    <>
+      {(manifest.credentials ?? []).map((slot) => {
+        const id = `gk-cred-${node.id}-${slot.name}`;
+        const current = node.credentials?.[slot.name];
+        const fits = (credentials ?? []).filter((c) => provides(c.type).some((p) => slot.accepts.includes(p)));
+        const gone = current && credentials && !credentials.some((c) => c.id === current.id);
+        return (
+          <div className="gk-field" key={slot.name}>
+            <label className="gk-field-label" htmlFor={id}>
+              {slot.label ?? slot.name}
+              {slot.required ? <span className="gk-required" aria-hidden="true">*</span> : null}
+            </label>
+            <select id={id} aria-required={slot.required || undefined} value={current?.id ?? ''} onChange={(e) => pick(slot, e.target.value)}>
+              <option value="">{slot.required ? 'Pick a credential…' : 'None'}</option>
+              {gone ? <option value={current.id}>A deleted credential</option> : null}
+              {!credentials && current ? <option value={current.id}>Loading…</option> : null}
+              {fits.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} · {title(c.type)}
+                  {c.status === 'needs_reauth' ? ' (needs signing in again)' : ''}
+                </option>
+              ))}
+            </select>
+            <span className="gk-field-hint">
+              {slot.description ? `${slot.description} ` : ''}
+              {credentials && fits.length === 0 ? 'No saved credential fits yet. ' : ''}
+              <a className="gk-link" href="#/credentials">
+                {credentials && fits.length === 0 ? 'Add one on the Credentials screen' : 'Manage credentials'}
+              </a>
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/** A box's actions for the run on screen — "Accept as baseline". Only a person can press these. */
+function BoxActions({ nodeId, manifest }: { nodeId: string; manifest: NodeManifest }) {
+  const store = useEditorStore();
+  const finished = useEditor((s) => s.run.record?.finishedAt !== undefined);
+  const acting = useEditor((s) => s.acting);
+  if (!finished) return null;
+  return (
+    <section className="gk-box-actions" aria-label="Actions for this run">
+      {(manifest.actions ?? []).map((a) => (
+        <div key={a.id} className="gk-box-action">
+          <button type="button" className="gk-btn-outline" disabled={acting !== undefined} onClick={() => void store.getState().runAction(nodeId, a.id)}>
+            {acting === `${nodeId}:${a.id}` ? 'Working…' : a.label}
+          </button>
+          {a.description ? <p className="gk-help">{a.description}</p> : null}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -311,7 +409,7 @@ function Field({
  * JSON is edited as text and committed only when it parses, so a half-typed
  * object never reaches the document. Undo from elsewhere resets the text.
  */
-function JsonField({
+export function JsonField({
   id,
   required,
   value,
@@ -391,6 +489,7 @@ function DataView({
             {portLabel(nodeType, port) || (port === 'main' ? 'Items' : port)}
             <span className="gk-muted"> · {env.items.length} item{env.items.length === 1 ? '' : 's'}</span>
           </h3>
+          <FileLinks envelopes={[env]} />
           <pre className="gk-json">{JSON.stringify(env.items.map((i) => i.data), null, 2)}</pre>
         </section>
       ))}

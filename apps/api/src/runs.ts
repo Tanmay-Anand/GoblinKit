@@ -11,7 +11,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { runWorkflow, type RunOptions } from '@goblin/drivers-inprocess';
+import { runWorkflow, type RunOptions, type RunServices } from '@goblin/drivers-inprocess';
 import { compile } from '@goblin/graph';
 import type { NodeDefinition } from '@goblin/node-sdk';
 import type { JournalEntry } from '@goblin/runtime';
@@ -84,6 +84,8 @@ export class RunManager {
       registry: ManifestRegistry;
       nodes: NodeDefinition[];
       runs: RunStore;
+      /** ctx.http, credentials, blobs and state for every box this runs. */
+      services?: RunServices;
       clock?: () => number;
       /** Told whenever a run starts, so the scheduler and UI can show it. */
       onStart?: (record: RunRecord) => void;
@@ -174,6 +176,9 @@ export class RunManager {
       nodes: this.deps.nodes,
       runId: record.runId,
       ...how,
+      ...(this.deps.services ? { services: this.deps.services } : {}),
+      // A box's state writes are applied only once its success is on disk.
+      durable: () => persisted,
       onJournal: (entries) => {
         if (entries.length === 0) return;
         journal.push(...entries);

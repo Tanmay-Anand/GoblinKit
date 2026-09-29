@@ -1,4 +1,6 @@
 import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig, devices } from '@playwright/test';
@@ -19,6 +21,9 @@ const CI = !!process.env['CI'];
 const API_PORT = 8788;
 const WEB_PORT = 5174;
 const workspace = fileURLToPath(new URL('./e2e/.workspace', import.meta.url));
+// The credentials key must live outside the workspace and the repo (the server
+// refuses otherwise), and must never be your real one: a throwaway in temp.
+const keyFile = join(tmpdir(), 'goblinkit-e2e', 'master.key');
 
 // Start each run from an empty workspace. Only the runner process does this:
 // workers load this file too, and must not delete what the server is using.
@@ -57,7 +62,7 @@ export default defineConfig({
       name: 'api',
       command: 'node node_modules/tsx/dist/cli.mjs apps/api/src/main.ts',
       url: `http://127.0.0.1:${API_PORT}/api/health`,
-      env: { GOBLIN_PORT: String(API_PORT), GOBLIN_WORKSPACE: workspace },
+      env: { GOBLIN_PORT: String(API_PORT), GOBLIN_WORKSPACE: workspace, GOBLIN_KEY_FILE: keyFile },
       reuseExistingServer: !CI,
       stdout: 'ignore',
       stderr: 'pipe',

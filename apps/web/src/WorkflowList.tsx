@@ -43,6 +43,12 @@ export function WorkflowList({ logoUrl, onOpen }: { logoUrl: string; onOpen: (id
         <img src={logoUrl} alt="" width={44} />
         <span className="gk-home-brand">GoblinKit</span>
         <span className="gk-home-local">Local · just you</span>
+        <nav className="gk-home-nav" aria-label="Sections">
+          <a href="#/" aria-current="page">
+            Workflows
+          </a>
+          <a href="#/credentials">Credentials</a>
+        </nav>
       </header>
 
       <main className="gk-home-main">

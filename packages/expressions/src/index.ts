@@ -14,6 +14,7 @@
  * behind a real sandbox boundary (ARCHITECTURE.md §13), not in a field.
  */
 
+import { LIBRARY } from '@goblin/fn';
 import type { JsonValue } from '@goblin/spec';
 
 export interface ResolveContext {
@@ -174,6 +175,10 @@ const FUNCTIONS: Record<string, (...args: JsonValue[]) => JsonValue> = {
     const factor = 10 ** Number(digits ?? 0);
     return Math.round(Number(v ?? 0) * factor) / factor;
   },
+  // Statistics and list helpers — sort, min, max, sum, avg, median,
+  // percentile (nearest-rank), pluck, slice — from @goblin/fn, the one copy
+  // node packs use too, so a box and an expression always agree.
+  ...(LIBRARY as unknown as Record<string, (...args: JsonValue[]) => JsonValue>),
 };
 
 class Parser {

@@ -59,3 +59,42 @@ export function migrateDocument(raw: unknown): MigrationResult {
   if (typeof doc['schemaVersion'] !== 'number') doc['schemaVersion'] = CURRENT_SCHEMA_VERSION;
   return { document: doc as unknown as WorkflowDocument, applied };
 }
+
+/* ------------------------------------------------------------------------ *
+ * Box type versions (§4.4, ADR-009)
+ *
+ * A box whose settings changed shape gets a new typeVersion and a migration
+ * from each older one. Documents are upgraded box by box when they are
+ * loaded, so a workflow saved with HTTP Request v1 opens as v2. The old
+ * version stays registered too, so a document nobody has reopened still runs.
+ * ------------------------------------------------------------------------ */
+
+export interface NodeMigration {
+  type: string;
+  from: number;
+  to: number;
+  up: (config: JsonObject) => JsonObject;
+}
+
+export interface NodeMigrationResult {
+  document: WorkflowDocument;
+  /** "box-id: core.http.request 1 → 2", one per box upgraded. */
+  applied: string[];
+}
+
+/** Upgrade every box that has a migration path to a newer version. Pure. */
+export function migrateNodes(document: WorkflowDocument, migrations: readonly NodeMigration[]): NodeMigrationResult {
+  if (!migrations.length) return { document, applied: [] };
+  const applied: string[] = [];
+  const nodes = document.nodes.map((node) => {
+    let current = node;
+    for (let guard = 0; guard < 100; guard++) {
+      const step = migrations.find((m) => m.type === current.type && m.from === current.typeVersion);
+      if (!step) break;
+      current = { ...current, typeVersion: step.to, config: step.up({ ...current.config }) };
+    }
+    if (current !== node) applied.push(`${node.id}: ${node.type} ${node.typeVersion} → ${current.typeVersion}`);
+    return current;
+  });
+  return applied.length ? { document: { ...document, nodes }, applied } : { document, applied };
+}

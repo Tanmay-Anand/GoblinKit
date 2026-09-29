@@ -6,8 +6,18 @@
  */
 
 import { RunRefused, type EditorBackend } from '@goblin/editor';
-import type { NodeManifest, WorkflowDocument } from '@goblin/spec';
-import type { ActivationStatus, ApiError, RunDetail, RunRecord, RunStreamMessage, WorkflowSummary } from '@goblin/api/protocol';
+import type { BinaryRef, CredentialTypeManifest, NodeManifest, WorkflowDocument } from '@goblin/spec';
+import type {
+  ActionResult,
+  ActivationStatus,
+  ApiError,
+  CredentialInput,
+  CredentialSummary,
+  RunDetail,
+  RunRecord,
+  RunStreamMessage,
+  WorkflowSummary,
+} from '@goblin/api/protocol';
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let res: Response;
@@ -35,6 +45,14 @@ export const api = {
   createWorkflow: (name: string) => call<WorkflowDocument>('/workflows', send('POST', { name })),
   getWorkflow: (id: string) => call<WorkflowDocument>(`/workflows/${encodeURIComponent(id)}`),
   deleteWorkflow: (id: string) => call<{ deleted: boolean }>(`/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // Values go in and never come back: every answer here is names and types.
+  listCredentials: () => call<CredentialSummary[]>('/credentials'),
+  listCredentialTypes: () => call<CredentialTypeManifest[]>('/credential-types'),
+  createCredential: (input: CredentialInput) => call<CredentialSummary>('/credentials', send('POST', input)),
+  replaceCredential: (id: string, input: { name?: string; values?: Record<string, string> }) =>
+    call<CredentialSummary>(`/credentials/${encodeURIComponent(id)}`, send('PUT', input)),
+  deleteCredential: (id: string) => call<{ deleted: boolean }>(`/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };
 
 export const backend: EditorBackend = {
@@ -45,6 +63,15 @@ export const backend: EditorBackend = {
   getActivation: (workflowId) => call<ActivationStatus>(`/workflows/${encodeURIComponent(workflowId)}/activation`),
   setActive: (workflowId, active) =>
     call<ActivationStatus>(`/workflows/${encodeURIComponent(workflowId)}/activation`, send('PUT', { active })),
+  listCredentials: api.listCredentials,
+  listCredentialTypes: api.listCredentialTypes,
+  runAction: (runId, nodeId, actionId) =>
+    call<ActionResult>(
+      `/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/actions/${encodeURIComponent(actionId)}`,
+      send('POST', {}),
+    ),
+  blobUrl: (ref: BinaryRef) =>
+    `/api/blobs/${encodeURIComponent(ref.key)}?${new URLSearchParams({ ...(ref.fileName ? { name: ref.fileName } : {}), type: ref.mimeType })}`,
 
   follow(runId, onMessage) {
     const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);

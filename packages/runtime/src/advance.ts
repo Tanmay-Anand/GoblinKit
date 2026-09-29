@@ -1,6 +1,6 @@
 import type { CompiledGraph, CompiledNode } from '@goblin/graph';
 import { resolveString } from '@goblin/expressions';
-import type { Edge, Envelope, Item, JsonValue, NodeId, PortId } from '@goblin/spec';
+import type { Edge, Envelope, Item, JsonValue, NodeId, PortId, StateWrite } from '@goblin/spec';
 
 import type { Command, NodeInvocation, RunEvent, SchedulerContext, Transition } from './protocol.js';
 import {
@@ -35,7 +35,7 @@ export function advance(state: RunState, event: RunEvent, ctx: SchedulerContext)
       pass.startRun(event.trigger, event.triggerNode);
       break;
     case 'NodeSucceeded':
-      pass.nodeSucceeded(event.nodeRunId, event.outputs);
+      pass.nodeSucceeded(event.nodeRunId, event.outputs, event.stateWrites);
       break;
     case 'NodeFailed':
       pass.nodeFailed(event.nodeRunId, event.error);
@@ -123,10 +123,12 @@ class Pass {
     }
   }
 
-  nodeSucceeded(nodeRunId: string, outputs: Record<PortId, Envelope>): void {
+  nodeSucceeded(nodeRunId: string, outputs: Record<PortId, Envelope>, stateWrites?: StateWrite[]): void {
     const run = this.state.nodeRuns[nodeRunId];
     if (!run || run.status !== 'running') return; // a late duplicate; at-least-once delivery is normal
-    this.emit({ kind: 'NodeRunSucceeded', at: this.now, nodeRunId, outputs });
+    // State writes ride along to the journal and nowhere else: the driver
+    // applies them, so no decision here depends on them.
+    this.emit({ kind: 'NodeRunSucceeded', at: this.now, nodeRunId, outputs, ...(stateWrites?.length ? { stateWrites } : {}) });
 
     const node = this.node(run.nodeId);
     if (!node) return;
@@ -380,7 +382,7 @@ class Pass {
     let everyRequiredPruned = true;
 
     for (const port of node.manifest.ports.inputs) {
-      const edges = (this.ctx.graph.incoming.get(node.id) ?? []).filter((e) => e.to.port === port.id);
+      const edges = this.joinedEdges(node, port.id);
       if (edges.length === 0) continue;
       sawAnyEdge = true;
 
@@ -432,6 +434,24 @@ class Pass {
       }
     }
     return 'ready';
+  }
+
+  /**
+   * The inbound edges a port's join waits for.
+   *
+   * A run started by one trigger leaves the others out entirely, so their
+   * wires are not waited on: three triggers wired straight into one box run
+   * it with whichever fired, where 'all' would otherwise wait forever for two
+   * wires that were pruned. A port fed *only* by triggers that did not fire
+   * keeps its pruned wires, so the box is skipped and what follows collapses,
+   * exactly as before.
+   */
+  private joinedEdges(node: CompiledNode, portId: PortId): readonly Edge[] {
+    const edges = (this.ctx.graph.incoming.get(node.id) ?? []).filter((e) => e.to.port === portId);
+    const fired = this.state.triggerNode;
+    if (!fired) return edges;
+    const live = edges.filter((e) => e.from.node === fired || !this.ctx.graph.triggers.includes(e.from.node));
+    return live.length > 0 ? live : edges;
   }
 
   private gatherInputs(node: CompiledNode, scopePath: ScopePath): Record<PortId, Envelope> {

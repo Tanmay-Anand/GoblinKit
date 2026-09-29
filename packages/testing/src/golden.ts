@@ -56,7 +56,12 @@ export function formatTrace(journal: readonly JournalEntry[]): string {
         break;
       case 'NodeRunSucceeded': {
         const ports = Object.entries(e.outputs).map(([port, env]) => `${port}=${env.items.length}`);
-        lines.push(`✓ ${runs.get(e.nodeRunId) ?? e.nodeRunId}${ports.length ? ` ${ports.join(' ')}` : ''}`);
+        const saved = e.stateWrites?.length ? ` (saves ${e.stateWrites.map((w) => w.key).join(', ')})` : '';
+        lines.push(`✓ ${runs.get(e.nodeRunId) ?? e.nodeRunId}${ports.length ? ` ${ports.join(' ')}` : ''}${saved}`);
+        break;
+      }
+      case 'StateWritesDropped': {
+        lines.push(`⚠ ${runs.get(e.nodeRunId) ?? e.nodeRunId} did not save ${e.keys.join(', ')}: another run changed them first`);
         break;
       }
       case 'NodeRunFailed':

@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "id": "wf_endpoint_latency",
+  "tenantId": "demo",
+  "name": "Endpoint latency (BM-1496)",
+  "description": "Times the old and new endpoints of the BM-1496 refactor, keeps a baseline per endpoint, and flags regressions. Set $vars.baseUrl, then pick a credential on the two measuring boxes.",
+  "variables": {
+    "baseUrl": "http://localhost:8080",
+    "tenantId": "",
+    "pageSize": 50
+  },
+  "nodes": [
+    {
+      "id": "manual",
+      "type": "core.trigger.manual",
+      "typeVersion": 1,
+      "label": "Run now",
+      "config": { "testInput": {} },
+      "ui": { "position": { "x": -400, "y": 0 } }
+    },
+    {
+      "id": "morning",
+      "type": "core.trigger.schedule",
+      "typeVersion": 1,
+      "label": "Every morning",
+      "config": { "repeat": "day", "at": "07:00", "testInput": {} },
+      "ui": { "position": { "x": 0, "y": 0 } }
+    },
+    {
+      "id": "deploy",
+      "type": "core.trigger.webhook",
+      "typeVersion": 1,
+      "label": "After a deploy",
+      "config": { "method": "POST", "respond": "immediately", "testInput": { "body": {}, "query": {} } },
+      "ui": { "position": { "x": 400, "y": 0 } }
+    },
+    {
+      "id": "targets",
+      "type": "core.transform.set",
+      "typeVersion": 1,
+      "label": "BM-1496 targets",
+      "config": {
+        "keepInput": false,
+        "values": {
+          "targets": [
+            { "key": "projects", "label": "old", "url": "{{ $vars.baseUrl }}/platform/projects/dropdown" },
+            { "key": "projects", "label": "names", "url": "{{ $vars.baseUrl }}/platform/projects/names" },
+            { "key": "projects", "label": "new", "url": "{{ $vars.baseUrl }}/platform/projects/autocomplete?limit=20" },
+            { "key": "users", "label": "old", "url": "{{ $vars.baseUrl }}/platform/users/names" },
+            { "key": "users", "label": "new", "url": "{{ $vars.baseUrl }}/platform/users/autocomplete?limit=20" },
+            { "key": "channel-partners", "label": "old", "url": "{{ $vars.baseUrl }}/platform/channel-partners/names" },
+            { "key": "channel-partners", "label": "new", "url": "{{ $vars.baseUrl }}/platform/channel-partners/autocomplete?limit=20" },
+            { "key": "buyers", "label": "old", "url": "{{ $vars.baseUrl }}/post-sales/buyers/names" },
+            { "key": "buyers", "label": "new", "url": "{{ $vars.baseUrl }}/post-sales/buyers/autocomplete?limit=20" },
+            { "key": "banks", "label": "old", "url": "{{ $vars.baseUrl }}/post-sales/banks/names" },
+            { "key": "banks", "label": "new", "url": "{{ $vars.baseUrl }}/post-sales/banks/autocomplete?limit=20" },
+            { "key": "cancellations", "label": "full", "url": "{{ $vars.baseUrl }}/post-sales/cancellations?page=0&size={{ $vars.pageSize }}" },
+            { "key": "cancellations", "label": "list", "url": "{{ $vars.baseUrl }}/post-sales/cancellations?page=0&size={{ $vars.pageSize }}&view=list" },
+            { "key": "refunds", "label": "full", "url": "{{ $vars.baseUrl }}/post-sales/cancellations/refunds?page=0&size={{ $vars.pageSize }}" },
+            { "key": "refunds", "label": "list", "url": "{{ $vars.baseUrl }}/post-sales/cancellations/refunds?page=0&size={{ $vars.pageSize }}&view=list" }
+          ]
+        }
+      },
+      "ui": { "position": { "x": 0, "y": 240 } }
+    },
+    {
+      "id": "split",
+      "type": "core.transform.split",
+      "typeVersion": 1,
+      "label": "One item per target",
+      "config": { "list": "{{ $json.targets }}" },
+      "ui": { "position": { "x": 0, "y": 460 } }
+    },
+    {
+      "id": "measure",
+      "type": "bench.http.measure",
+      "typeVersion": 1,
+      "label": "Measure latency",
+      "config": {
+        "url": "{{ $json.url }}",
+        "key": "{{ $json.key }}",
+        "label": "{{ $json.label }}",
+        "headers": { "x-tenant-id": "{{ $vars.tenantId }}" },
+        "warmupRuns": 1,
+        "runs": 5
+      },
+      "ui": { "position": { "x": 0, "y": 680 } }
+    },
+    {
+      "id": "failed",
+      "type": "core.log",
+      "typeVersion": 1,
+      "label": "Target failed",
+      "config": { "message": "{{ length($items) }} target(s) could not be measured. First: {{ $json.key }} / {{ $json.label }}: {{ $json.message }}" },
+      "ui": { "position": { "x": 420, "y": 900 } }
+    },
+    {
+      "id": "compare",
+      "type": "bench.compare",
+      "typeVersion": 1,
+      "label": "Compare old vs new",
+      "config": { "pairs": [["old", "new"], ["names", "new"], ["full", "list"]], "tolerancePct": 10 },
+      "ui": { "position": { "x": 0, "y": 900 } }
+    },
+    {
+      "id": "baseline",
+      "type": "bench.baseline",
+      "typeVersion": 1,
+      "label": "Check against baseline",
+      "config": { "regressionPct": 20, "tolerancePct": 10, "baselinePolicy": "onPass", "remeasure": true, "environment": "{{ $vars.baseUrl }}", "title": "Endpoint latency — BM-1496" },
+      "ui": { "position": { "x": 0, "y": 1120 } }
+    },
+    {
+      "id": "ok",
+      "type": "core.log",
+      "typeVersion": 1,
+      "label": "Within baseline",
+      "config": { "message": "{{ length($items) }} endpoint variant(s) within their baseline" },
+      "ui": { "position": { "x": -400, "y": 1340 } }
+    },
+    {
+      "id": "regression",
+      "type": "core.log",
+      "typeVersion": 1,
+      "label": "REGRESSION",
+      "config": { "message": "REGRESSION in {{ length($items) }} endpoint variant(s). First: {{ $json.key }} / {{ $json.label }} at {{ $json.medianMs }} ms against a {{ $json.baselineMs }} ms baseline (+{{ $json.deltaPct }}%)" },
+      "ui": { "position": { "x": 0, "y": 1340 } }
+    },
+    {
+      "id": "report",
+      "type": "core.log",
+      "typeVersion": 1,
+      "label": "Report",
+      "config": { "message": "{{ $json.summary }}" },
+      "ui": { "position": { "x": 400, "y": 1340 } }
+    },
+    {
+      "id": "chart",
+      "type": "bench.chart",
+      "typeVersion": 1,
+      "label": "Before/after chart",
+      "config": { "metric": "time", "title": "BM-1496: before and after" },
+      "ui": { "position": { "x": 800, "y": 1340 } }
+    }
+  ],
+  "edges": [
+    { "id": "e_manual", "from": { "node": "manual", "port": "main" }, "to": { "node": "targets", "port": "main" } },
+    { "id": "e_morning", "from": { "node": "morning", "port": "main" }, "to": { "node": "targets", "port": "main" } },
+    { "id": "e_deploy", "from": { "node": "deploy", "port": "main" }, "to": { "node": "targets", "port": "main" } },
+    { "id": "e_split", "from": { "node": "targets", "port": "main" }, "to": { "node": "split", "port": "main" } },
+    { "id": "e_measure", "from": { "node": "split", "port": "main" }, "to": { "node": "measure", "port": "main" } },
+    { "id": "e_failed", "from": { "node": "measure", "port": "error" }, "to": { "node": "failed", "port": "main" } },
+    { "id": "e_compare", "from": { "node": "measure", "port": "main" }, "to": { "node": "compare", "port": "main" } },
+    { "id": "e_baseline", "from": { "node": "compare", "port": "main" }, "to": { "node": "baseline", "port": "main" } },
+    { "id": "e_ok", "from": { "node": "baseline", "port": "main" }, "to": { "node": "ok", "port": "main" } },
+    { "id": "e_regression", "from": { "node": "baseline", "port": "regressions" }, "to": { "node": "regression", "port": "main" } },
+    { "id": "e_report", "from": { "node": "baseline", "port": "report" }, "to": { "node": "report", "port": "main" } },
+    { "id": "e_chart", "from": { "node": "compare", "port": "main" }, "to": { "node": "chart", "port": "main" } }
+  ]
+}

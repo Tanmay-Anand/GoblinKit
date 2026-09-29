@@ -20,6 +20,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@goblin/spec': at('../../packages/spec/src/index.ts'),
+      '@goblin/fn': at('../../packages/fn/src/index.ts'),
       '@goblin/graph': at('../../packages/graph/src/index.ts'),
       '@goblin/expressions': at('../../packages/expressions/src/index.ts'),
       '@goblin/runtime': at('../../packages/runtime/src/index.ts'),

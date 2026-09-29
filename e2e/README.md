@@ -18,10 +18,14 @@ machine without it, run `pnpm exec playwright install chrome`.
 
 | Path | What it is |
 |---|---|
-| `support/fixtures.ts` | `test` and `expect` for every spec, with the `api`, `canvas` and `workflows` fixtures |
-| `support/api.ts` | Arranges state over HTTP, and deletes what each test created |
-| `pages/` | Page objects: the canvas and the workflow list, in the words a person would use |
-| `*.spec.ts` | One file per area: building and running, watching a run, problems, editing, the list |
+| `support/fixtures.ts` | `test` and `expect` for every spec, with the `api`, `canvas`, `workflows` and `credentials` fixtures |
+| `support/api.ts` | Arranges state over HTTP — workflows and credentials — and deletes what each test created |
+| `support/stub-api.ts` | A stand-in dev API for the measuring boxes, recording what it was sent |
+| `pages/` | Page objects: the canvas, the workflow list and the Credentials screen, in the words a person would use |
+| `*.spec.ts` | One file per area: building and running, watching a run, problems, editing, the list, starting by itself, endpoint latency |
+
+The server under test keeps its credentials key in the system temp folder, never in
+your profile folder and never in the repo.
 
 ## Conventions
 

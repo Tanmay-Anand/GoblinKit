@@ -14,13 +14,24 @@ import { compile } from '@goblin/graph';
 import {
   MapRegistry,
   validateDocument,
+  type BinaryRef,
+  type CredentialTypeManifest,
   type Diagnostic,
   type NodeInstance,
   type NodeManifest,
   type WorkflowDocument,
   type XY,
 } from '@goblin/spec';
-import type { ActivationStatus, LogLine, RunDetail, RunRecord, RunStreamMessage, TriggerStatus } from '@goblin/api/protocol';
+import type {
+  ActionResult,
+  ActivationStatus,
+  CredentialSummary,
+  LogLine,
+  RunDetail,
+  RunRecord,
+  RunStreamMessage,
+  TriggerStatus,
+} from '@goblin/api/protocol';
 
 import { applyCommand, newEdgeId, newNodeId, type DocumentCommand } from './document/commands.js';
 import { History } from './document/history.js';
@@ -40,6 +51,13 @@ export interface EditorBackend {
   getActivation(workflowId: string): Promise<ActivationStatus>;
   /** Rejects with the reason when switching on is refused. */
   setActive(workflowId: string, active: boolean): Promise<ActivationStatus>;
+  /** Saved credentials — names and types only, never values. */
+  listCredentials(): Promise<CredentialSummary[]>;
+  listCredentialTypes(): Promise<CredentialTypeManifest[]>;
+  /** A box's run-view action, like "Accept as baseline". */
+  runAction(runId: string, nodeId: string, actionId: string): Promise<ActionResult>;
+  /** Where a file a box made can be downloaded. */
+  blobUrl(ref: BinaryRef): string;
 }
 
 export class RunRefused extends Error {
@@ -53,7 +71,8 @@ export type Panel =
   /** `from`: grow from a box's output. `at`: drop where the canvas was right-clicked. */
   | { kind: 'add'; from?: { node: string; port: string }; at?: XY }
   | { kind: 'box'; nodeId: string; tab: 'settings' | 'input' | 'output' }
-  | { kind: 'runs' };
+  | { kind: 'runs' }
+  | { kind: 'variables' };
 
 export interface RunSlice {
   projection: RunProjection;
@@ -91,6 +110,11 @@ export interface EditorState {
   /** Per box id, for the boxes that start the workflow by themselves. */
   triggers: Readonly<Record<string, TriggerStatus>>;
   switching: boolean;
+  /** Saved credentials; undefined until loaded, so nothing is marked missing too early. */
+  credentials?: CredentialSummary[];
+  credentialTypes: CredentialTypeManifest[];
+  /** "nodeId:actionId" while that action is running. */
+  acting?: string | undefined;
 
   /** Nodes by id, so a box finds itself without scanning the list (§15.3, rule 2). */
   byId: Readonly<Record<string, NodeInstance>>;
@@ -113,6 +137,11 @@ export interface EditorState {
   notify(tone: Toast['tone'], text: string): void;
   refreshActivation(): Promise<void>;
   setActive(active: boolean): Promise<void>;
+  refreshCredentials(): Promise<void>;
+  /** Run a box's action on the run on screen. */
+  runAction(nodeId: string, actionId: string): Promise<void>;
+  /** Where a file a box made downloads from. */
+  blobUrl(ref: BinaryRef): string;
 }
 
 export type EditorStore = StoreApi<EditorState>;
@@ -132,7 +161,7 @@ export function createEditorStore(args: {
   return createStore<EditorState>((set, get) => {
     /** Replace the document and everything derived from it. */
     const commit = (doc: WorkflowDocument) => {
-      const diagnostics = diagnose(doc, registry);
+      const diagnostics = diagnose(doc, registry, get().credentials);
       set({
         doc,
         byId: indexNodes(doc),
@@ -194,6 +223,7 @@ export function createEditorStore(args: {
       history: [],
       triggers: {},
       switching: false,
+      credentialTypes: [],
 
       dispatch(cmd, coalesceKey) {
         const before = get().doc;
@@ -237,7 +267,8 @@ export function createEditorStore(args: {
       },
 
       addBox(type, options = {}) {
-        const manifest = args.manifests.find((m) => m.type === type);
+        // The newest version of the type: older ones exist only so old workflows run.
+        const manifest = args.manifests.filter((m) => m.type === type).sort((a, b) => b.version - a.version)[0];
         if (!manifest) return undefined;
         const doc = get().doc;
         const id = newNodeId(doc, manifest.title);
@@ -378,6 +409,37 @@ export function createEditorStore(args: {
         }
       },
 
+      blobUrl: (ref) => args.backend.blobUrl(ref),
+
+      async refreshCredentials() {
+        try {
+          const [credentials, credentialTypes] = await Promise.all([args.backend.listCredentials(), args.backend.listCredentialTypes()]);
+          const diagnostics = diagnose(get().doc, registry, credentials);
+          set({ credentials, credentialTypes, diagnostics, problems: locate(get().doc, diagnostics) });
+        } catch {
+          // Without the list the picker shows only what is set; nothing is lost.
+        }
+      },
+
+      async runAction(nodeId, actionId) {
+        const runId = get().run.runId;
+        if (!runId) return;
+        set({ acting: `${nodeId}:${actionId}` });
+        try {
+          const result = await args.backend.runAction(runId, nodeId, actionId);
+          get().notify(
+            result.conflicts.length ? 'info' : 'success',
+            result.conflicts.length
+              ? `${result.message} Another run changed ${result.conflicts.join(', ')} first, so those were left as they are.`
+              : result.message,
+          );
+        } catch (error) {
+          get().notify('error', error instanceof Error ? error.message : String(error));
+        } finally {
+          set({ acting: undefined });
+        }
+      },
+
       async setActive(active) {
         // Switch on what is on screen, not the last autosave.
         await get().flushSave();
@@ -399,8 +461,31 @@ export function createEditorStore(args: {
   });
 }
 
-function diagnose(doc: WorkflowDocument, registry: MapRegistry): Diagnostic[] {
-  return [...validateDocument(doc, registry), ...compile(doc, registry).diagnostics];
+function diagnose(doc: WorkflowDocument, registry: MapRegistry, credentials?: CredentialSummary[]): Diagnostic[] {
+  return [...validateDocument(doc, registry), ...compile(doc, registry).diagnostics, ...credentialProblems(doc, credentials)];
+}
+
+/**
+ * What only the editor can know: a picked credential that has since been
+ * deleted, or one that needs signing in again. Marked on the box like any
+ * other problem, before a run finds out the hard way.
+ */
+function credentialProblems(doc: WorkflowDocument, credentials: CredentialSummary[] | undefined): Diagnostic[] {
+  if (!credentials) return [];
+  const byId = new Map(credentials.map((c) => [c.id, c]));
+  const out: Diagnostic[] = [];
+  doc.nodes.forEach((node, index) => {
+    for (const [slot, ref] of Object.entries(node.credentials ?? {})) {
+      const found = byId.get(ref.id);
+      const path = ['nodes', index, 'credentials', slot];
+      if (!found) {
+        out.push({ severity: 'error', code: 'MISSING_CREDENTIAL', path, message: `The credential picked for ${node.label ?? node.id} was deleted. Pick another.` });
+      } else if (found.status === 'needs_reauth') {
+        out.push({ severity: 'warning', code: 'MISSING_CREDENTIAL', path, message: `“${found.name}” needs signing in again: replace its values on the Credentials screen.` });
+      }
+    }
+  });
+  return out;
 }
 
 /** Attach each diagnostic to the box or wire its path points at. */
