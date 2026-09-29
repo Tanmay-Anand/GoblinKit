@@ -3,6 +3,8 @@
  *
  *   GOBLIN_PORT        port to listen on (default 8787)
  *   GOBLIN_WORKSPACE   folder for workflows and runs (default ./workspace)
+ *   GOBLIN_KEY_FILE    the credentials key (default: in your profile folder,
+ *                      %APPDATA%\GoblinKit\master.key or ~/.config/goblinkit/master.key)
  *
  * It listens on 127.0.0.1 only. Local mode has no login, so it must never be
  * reachable from the network.
@@ -13,12 +15,15 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { coreManifests, coreNodes } from '@goblin/nodes-core';
 import { MapRegistry, type WorkflowDocument } from '@goblin/spec';
 
+import { FileAuditLog } from './audit.js';
+import { defaultKeyPath, FileCredentialStore, LocalKeyProvider } from './credentials.js';
+import { credentialTypes, manifests, nodes } from './packs.js';
+import { FileBlobStore, FileStateStore } from './platform-stores.js';
 import { LOCAL_TENANT } from './protocol.js';
 import { createApi } from './server.js';
-import { FileActivationStore, FileRunStore, FileWorkflowStore, type WorkflowStore } from './stores.js';
+import { FileActivationStore, FileRunStore, FileWorkflowStore, writeJson, type WorkflowStore } from './stores.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const port = Number(process.env['GOBLIN_PORT'] ?? 8787);
@@ -28,6 +33,9 @@ const webDist = join(repo, 'apps', 'web', 'dist');
 const workflows = new FileWorkflowStore(join(workspace, 'workflows'));
 const runStore = new FileRunStore(join(workspace, 'runs'));
 const activations = new FileActivationStore(join(workspace, 'activations.json'));
+// The key that unlocks saved credentials lives outside the workspace and the
+// repo, so copying either carries only ciphertext (ADR-017).
+const keys = new LocalKeyProvider(resolve(process.env['GOBLIN_KEY_FILE'] ?? defaultKeyPath()), [workspace, repo]);
 
 await seed(workflows);
 
@@ -36,9 +44,14 @@ const { server, runs, triggers } = createApi({
   runs: runStore,
   activations,
   hooksBase: `http://127.0.0.1:${port}`,
-  registry: new MapRegistry(coreManifests),
-  manifests: coreManifests,
-  nodes: coreNodes,
+  registry: new MapRegistry(manifests),
+  manifests,
+  nodes,
+  credentials: new FileCredentialStore(join(workspace, 'credentials.enc.json'), keys),
+  credentialTypes,
+  blobs: new FileBlobStore(join(workspace, 'blobs')),
+  state: new FileStateStore(join(workspace, 'state')),
+  audit: new FileAuditLog(join(workspace, 'audit.ndjson')),
   ...(existsSync(webDist) ? { staticDir: webDist } : {}),
   allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
 });
@@ -64,14 +77,29 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 /**
- * A first start gets the order-triage example, so the canvas opens on
- * something that runs.
- *
+ * Examples arrive once each: order triage on a first start, so the canvas
+ * opens on something that runs, and later examples as they ship. A marker
+ * file remembers which were added, so deleting one keeps it deleted.
+ */
+async function seed(store: WorkflowStore): Promise<void> {
+  const markerPath = join(workspace, 'examples-added.json');
+  const added = new Set(JSON.parse(await readFile(markerPath, 'utf8').catch(() => '[]')) as string[]);
+  const fresh = (await store.list()).length === 0;
+  if (fresh && !added.has('order-triage')) await seedOrderTriage(store);
+  added.add('order-triage');
+  if (!added.has('endpoint-latency')) {
+    const example = JSON.parse(await readFile(join(repo, 'examples', 'endpoint-latency.json'), 'utf8')) as WorkflowDocument;
+    if (!(await store.get(example.id))) await store.put({ ...example, tenantId: LOCAL_TENANT });
+    added.add('endpoint-latency');
+  }
+  await writeJson(markerPath, [...added]);
+}
+
+/**
  * The CLI example was drawn left to right; the canvas flows top to bottom,
  * so its positions are turned a quarter and spaced for card-sized boxes.
  */
-async function seed(store: WorkflowStore): Promise<void> {
-  if ((await store.list()).length > 0) return;
+async function seedOrderTriage(store: WorkflowStore): Promise<void> {
   const example = JSON.parse(await readFile(join(repo, 'examples', 'order-triage.json'), 'utf8')) as WorkflowDocument;
   await store.put({
     ...example,

@@ -22,6 +22,9 @@ durably, observably, and at multi-tenant scale.
 
 Stages 1–4 of the [build order](#build-order): the engine, **the canvas** — start the
 app, pick boxes, connect them, press Run — and workflows that **start by themselves**.
+On top of that, the platform capabilities every later pack builds on (encrypted
+credentials, metered HTTP, box state, files) and the first pack that uses them all:
+[measuring endpoint latency](#measuring-endpoint-latency).
 
 On Windows, double-click **`Start GoblinKit.cmd`** in the project folder: it installs
 what it needs the first time, starts GoblinKit, and opens it in your browser once it is
@@ -60,17 +63,27 @@ pnpm dev          # the same, without opening the browser: http://127.0.0.1:5173
 - **Runs survive a restart.** Each step is written to disk as it happens, so a run under
   way when GoblinKit closes — even mid-way through a three-day Wait — carries on from where
   it was on the next start.
+- **Save credentials** — a bearer token, an API key, basic auth, a Cognito refresh token —
+  on the **Credentials** screen, and pick one in a box's settings. The picker offers only
+  credentials the box can use; values are encrypted on disk, never shown again, applied
+  to the request by the platform, and scrubbed from logs. A box whose credential was
+  deleted is marked before you run.
+- **Workflow variables** (the `{ }` button on the left) hold values every box reads as
+  `{{ $vars.name }}` — the address of the API you are testing, a page size.
+- **Files a box makes**, like a report, download from its output and from the run; images,
+  like a chart, are shown there too.
 
 Everything is local: one user, no login, workflows and runs saved as JSON in
 `workspace/`. The server behind the canvas listens on `127.0.0.1` only and refuses
 requests from other websites — webhooks included, so no web page you visit can fire your
-workflows. The first start seeds the order-triage example.
+workflows. The first start seeds the order-triage example, and the endpoint-latency
+example is added once.
 
 The engine also runs without the canvas:
 
 ```bash
-pnpm test                                    # 119 unit and integration tests
-pnpm test:e2e                                # 28 browser tests of the canvas, see e2e/README.md
+pnpm test                                    # 245 unit and integration tests
+pnpm test:e2e                                # 31 browser tests of the canvas, see e2e/README.md
 pnpm goblin run examples/order-triage.json --input '{"total":250,"lines":[{"sku":"A","qty":2,"price":30}]}'
 ```
 
@@ -97,14 +110,55 @@ always derived:
 | Compilation, scope matching, loop-back edge detection, scope chains, affected subgraph | `graph` |
 | `advance()`, run state, journal + fold, join policies, retries, scopes, timers | `runtime` |
 | `{{ }}` interpreter with no `eval` and no host access | `expressions` |
-| `defineManifest` / `defineExecutor`, executor context, test harness | `node-sdk` |
-| Manual, Schedule and Webhook triggers, Set, If, Switch, Merge, HTTP Request, Log, ForEach, While, Wait; cron and next-fire | `nodes-core` |
+| Statistics and list helpers (`median`, nearest-rank `percentile`, `pluck`…), shared by expressions and packs | `fn` |
+| `defineManifest` / `defineExecutor`, executor context; `ctx.http` (timing, size cap, egress rule, credentials applied), credential types, capabilities and the credential runtime, `ctx.state` with version checks, `ctx.blobs`; the harness with mocked HTTP | `node-sdk` |
+| Manual, Schedule and Webhook triggers, Set, Split list, If, Switch, Merge, HTTP Request (v2 on `ctx.http`), Log, ForEach, While, Wait; cron and next-fire; bearer, header-key, basic-auth and query-key credentials | `nodes-core` |
+| Measure latency, Compare variants, Check against baseline (baselines per endpoint and environment, a ratchet, a noise floor, re-measure before alerting, a Markdown report, Accept as baseline), Before/after chart | `nodes-bench` |
+| AWS Cognito sign-in from a refresh token | `nodes-aws` |
 | Single-process driver: clock, executors, timers; resume from a journal | `drivers-inprocess` |
-| Golden-file run traces, the node-pack contract every pack must pass | `testing` |
-| Commands + undo, connection rules, live run view, the React Flow canvas and panels | `editor` |
-| Local server: workspace files behind storage ports, journals appended as runs happen, runs streamed over SSE, the scheduler, webhooks, resume on startup | `apps/api` |
-| The app shell: workflow list, canvas screen | `apps/web` |
+| Golden-file run traces, the node-pack and credential-pack contracts every pack must pass | `testing` |
+| Commands + undo, connection rules, live run view, the React Flow canvas and panels; credential picker, variables, files and run actions | `editor` |
+| Local server: workspace files behind storage ports, journals appended as runs happen, runs streamed over SSE, the scheduler, webhooks, resume on startup; encrypted credentials with the key in your profile folder, box state and files, the audit log | `apps/api` |
+| The app shell: workflow list, canvas screen, Credentials screen | `apps/web` |
 | `goblin run` / `validate` / `replay` / `nodes` | `apps/cli` |
+
+### Measuring endpoint latency
+
+`examples/endpoint-latency.json` automates the manual "endpoint latency check with curl"
+guide, pointed at the BM-1496 refactor (`/names` and `/dropdown` → `/autocomplete`, full
+rows → `view=list`). It measures each endpoint (one warm-up, then five timed requests),
+pairs old with new, keeps a baseline per endpoint and environment, writes a Markdown
+report, and draws a before/after chart:
+
+1. Open **Endpoint latency (BM-1496)**. In **Variables** (`{ }` on the left), set
+   `baseUrl` to the dev API and `tenantId` to a tenant with real data.
+2. On **Credentials**, add an **AWS Cognito (refresh token)**: the region, the web app's
+   client id (it must allow `ALLOW_REFRESH_TOKEN_AUTH`, the default), and the refresh
+   token from the web app's `localStorage` after signing in
+   (`CognitoIdentityServiceProvider.<clientId>.<user>.refreshToken`). A fresh ID token is
+   minted when a run needs one. Never put the token in a workflow. The credential sends
+   only the refresh token, so it works with a **public app client** (no client secret,
+   which is what browser apps use) and **device tracking off**. A client with a secret
+   needs a `SECRET_HASH`, and a remembered device needs its `DEVICE_KEY`; Cognito rejects
+   the refresh without them, and the credential is marked as needing sign-in again.
+3. Pick it on **Measure latency** and **Check against baseline**, then press **Run**.
+   The report downloads from the baseline box's output; the **Before/after chart** box
+   shows each endpoint's old and new time as bars in its output. **Every morning** and
+   **After a deploy** run it by themselves once the workflow is **Activate**d.
+
+The first run in an environment sets each endpoint's baseline there. Baselines are kept
+per `baseUrl`, so numbers taken on `localhost` never judge dev. After that, an endpoint
+more than 20% **and** at least 5 ms over its baseline is measured once more, and flagged
+only if it is still slow. Changes under the noise floor (5 ms, or 512 bytes when comparing
+sizes) count as "about the same", however big the percentage: 16 ms against 20 ms is 25%
+and means nothing. A baseline can
+rise at most 10% a run, so a slow creep still alerts. When a slowdown is intended, press
+**Accept as baseline** on that run's baseline box: it takes the run's recorded numbers
+without measuring again. Only a person can do that — no webhook can. The paths in
+**BM-1496 targets** match the Builder-CRM controllers; projects has two old endpoints
+(`/names` and `/dropdown`), and each is compared with `/autocomplete`.
+Times are measured with kept-alive connections and sizes are decoded (gzip undone),
+unlike `curl`'s defaults; the report says so, and old and new are measured alike.
 
 **Next up: power boxes (Stage 5)** — Code in a real sandbox, Sub-workflow, an AI step,
 expression autocomplete, re-run from a failed box. After it: integrations (Stage 6), then
@@ -308,7 +362,10 @@ goblinkit/
 │   ├── runtime/              # advance() · state · commands · events · policies  ← built, the engine
 │   ├── node-sdk/             # defineManifest · defineExecutor · ctx · harness    ← built
 │   ├── nodes-core/           # trigger · http · if/switch/merge · set · loops · wait ← built
+│   ├── nodes-bench/          # measure · compare · baselines + report · chart       ← built
+│   ├── nodes-aws/            # Cognito refresh-token credential                     ← built
 │   ├── nodes-*/              # integration packs
+│   ├── fn/                   # shared statistics and list functions, no deps        ← built
 │   ├── drivers-inprocess/    # single-process driver (tests, CLI, local dev)      ← built
 │   ├── drivers-queue/        # pg-boss/BullMQ · leases · heartbeats · recovery
 │   ├── persistence/          # Postgres repos · journal · blobs · outbox
@@ -356,7 +413,7 @@ workflows saved as files. Production durability, accounts and scale follow once 
 | **3 · Canvas** ✅ | **The first usable app.** Palette → drag boxes → connect ports → settings panel → **Run**, with each box lighting up live and its input/output one click away. Workflows and runs saved to a local workspace folder. Golden-file harness + contract suite first. | — (the ten above, on a canvas) |
 | **4 · Self-starting** ✅ | An **Active** switch per workflow, a local scheduler and webhook URL. Journals written to disk as they happen, so runs (and a three-day Wait) survive a restart. | Schedule, Webhook |
 | **5 · Power boxes** | Real sandbox (QuickJS-WASM), expression autocomplete from real data, pinned data, re-run from a failed box, journal scrubbing. | Code, Sub-workflow, AI step |
-| **6 · Integrations** | Local encrypted credentials, OAuth sign-in. Each integration is its own node pack. | Slack, Email, Google Sheets |
+| **6 · Integrations** | Local encrypted credentials ✅ (pulled forward, [ADR-017](ARCHITECTURE.md#18-decision-records)), OAuth sign-in. Each integration is its own node pack. | Slack, Email, Google Sheets |
 | **7 · Durability** | Postgres behind the same storage ports, queue driver with leases + heartbeats + recovery sweeper. Chaos test: kill workers mid-run, assert exactly-once. | — |
 | **8 · Platform** | Accounts, auth, tenancy + RLS, envelope-encrypted credentials, hosted webhooks, leader-elected scheduler, quotas. | — |
 | **9 · Scale** | Per-class worker pools, dedicated sandbox pool, signed node-pack registry, history retention tiers. | — |
@@ -387,7 +444,7 @@ A change that breaks one of these needs an ADR ([ARCHITECTURE.md §18](ARCHITECT
 
 ## Status
 
-Stages 1–4 built: the canvas runs, and workflows start by themselves. Stage 5, power boxes, is next. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
+Stages 1–4 built: the canvas runs, and workflows start by themselves. The platform capabilities of ADR-017 (credentials, `ctx.http`, `ctx.state`, `ctx.blobs`) and the endpoint-latency packs are built too. Stage 5, power boxes, is next. `ARCHITECTURE.md` is the specification of record — read it before writing code, and amend it (with an ADR) rather than diverging from it.
 
 ## License
 

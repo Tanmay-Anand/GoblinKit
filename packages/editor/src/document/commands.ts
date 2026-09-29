@@ -8,12 +8,12 @@
  * (§15.2). Pure: no React, no store, no I/O.
  */
 
-import type { Edge, NodeInstance, WorkflowDocument, XY } from '@goblin/spec';
+import type { Edge, NodeInstance, WorkflowDocument, XY, JsonValue } from '@goblin/spec';
 
 import { rotationOf, turn } from '../rotation.js';
 
 /** Fields a patch may change. Setting one to undefined removes it. */
-export type NodePatch = { [K in 'label' | 'config' | 'policy' | 'ui' | 'disabled']?: NodeInstance[K] | undefined };
+export type NodePatch = { [K in 'label' | 'config' | 'policy' | 'ui' | 'disabled' | 'credentials']?: NodeInstance[K] | undefined };
 
 export type DocumentCommand =
   /** Add a box, and optionally the wires that connect it in the same step. */
@@ -25,7 +25,9 @@ export type DocumentCommand =
   | { kind: 'UpdateNode'; nodeId: string; patch: NodePatch }
   /** Turn boxes a quarter clockwise (90) or anticlockwise (-90), as one step. */
   | { kind: 'RotateNodes'; nodeIds: string[]; by: 90 | -90 }
-  | { kind: 'RenameWorkflow'; name: string };
+  | { kind: 'RenameWorkflow'; name: string }
+  /** Replace the workflow's variables, read as {{ $vars.name }}. Undefined clears them. */
+  | { kind: 'SetVariables'; variables: Record<string, JsonValue> | undefined };
 
 export function applyCommand(doc: WorkflowDocument, cmd: DocumentCommand): WorkflowDocument {
   switch (cmd.kind) {
@@ -78,6 +80,11 @@ export function applyCommand(doc: WorkflowDocument, cmd: DocumentCommand): Workf
 
     case 'RenameWorkflow':
       return { ...doc, name: cmd.name };
+
+    case 'SetVariables': {
+      const { variables: _old, ...rest } = doc;
+      return cmd.variables && Object.keys(cmd.variables).length ? { ...rest, variables: cmd.variables } : rest;
+    }
   }
 }
 

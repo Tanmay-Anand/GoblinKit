@@ -9,4 +9,4 @@
  */
 
 export { formatTrace, matchGolden, traceRun, type GoldenResult, type TraceOptions } from './golden.js';
-export { checkNodePack, type NodePackInput } from './contract.js';
+export { checkCredentialPack, checkNodePack, findSecrets, type CredentialPackInput, type NodePackInput } from './contract.js';

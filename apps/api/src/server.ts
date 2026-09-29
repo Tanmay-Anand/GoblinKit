@@ -19,10 +19,37 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, join, normalize, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-import type { NodeDefinition } from '@goblin/node-sdk';
-import { migrateDocument, type JsonValue, type NodeManifest, type ManifestRegistry, type WorkflowDocument } from '@goblin/spec';
+import {
+  createHttpClient,
+  createScopedKV,
+  CredentialRuntime,
+  InMemoryBlobStore,
+  InMemoryCredentialStore,
+  InMemoryStateStore,
+  isBlobKey,
+  nodeMigrations,
+  type BlobStore,
+  type Capability,
+  type CredentialStore,
+  type CredentialTypeDefinition,
+  type MeteredHttpClient,
+  type NodeDefinition,
+  type StateStore,
+} from '@goblin/node-sdk';
+import { foldJournal } from '@goblin/runtime';
+import {
+  migrateDocument,
+  migrateNodes,
+  type CredentialTypeManifest,
+  type Envelope,
+  type JsonValue,
+  type ManifestRegistry,
+  type NodeManifest,
+  type WorkflowDocument,
+} from '@goblin/spec';
 
-import { LOCAL_TENANT, type ApiError, type RunStreamMessage } from './protocol.js';
+import { MemoryAuditLog, type AuditLog } from './audit.js';
+import { LOCAL_TENANT, type ActionResult, type ApiError, type RunStreamMessage } from './protocol.js';
 import { InvalidWorkflowError, RunManager, diagnose, toEnvelope } from './runs.js';
 import { StoreError, type ActivationStore, type RunStore, type WorkflowStore } from './stores.js';
 import { ActivationError, TriggerService, safeHeaders } from './triggers.js';
@@ -40,6 +67,21 @@ export interface ApiOptions {
   allowedOrigins?: string[];
   /** Where webhook URLs point: this server's own address, e.g. http://127.0.0.1:8787 */
   hooksBase?: string;
+  /** Saved credentials. Absent: an in-memory store, for tests. */
+  credentials?: CredentialStore;
+  /** Every credential type the installed packs ship, with its resolver. */
+  credentialTypes?: CredentialTypeDefinition[];
+  /** Capabilities packs define, beside the kit's httpAuth@1 and httpSigner@1. */
+  capabilities?: Capability[];
+  /** Where ctx.blobs keeps files. Absent: memory. */
+  blobs?: BlobStore;
+  /** Where ctx.state is kept. Absent: memory. */
+  state?: StateStore;
+  audit?: AuditLog;
+  /** 'local' (default) lets boxes call servers on this machine, like your own dev API. */
+  httpMode?: 'local' | 'hosted';
+  /** The client boxes and credential resolvers use. Tests hand in a mock. */
+  http?: MeteredHttpClient;
 }
 
 class HttpError extends Error {
@@ -50,8 +92,35 @@ class HttpError extends Error {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApi(options: ApiOptions): { server: Server; runs: RunManager; triggers: TriggerService } {
-  const runs = new RunManager({ registry: options.registry, nodes: options.nodes, runs: options.runs });
+export function createApi(options: ApiOptions): {
+  server: Server;
+  runs: RunManager;
+  triggers: TriggerService;
+  credentials: CredentialRuntime;
+} {
+  const http = options.http ?? createHttpClient({ mode: options.httpMode ?? 'local' });
+  const credentialStore = options.credentials ?? new InMemoryCredentialStore();
+  const credentialTypes = options.credentialTypes ?? [];
+  const credentials = new CredentialRuntime({
+    store: credentialStore,
+    types: credentialTypes,
+    http,
+    ...(options.capabilities ? { capabilities: options.capabilities } : {}),
+  });
+  const blobs = options.blobs ?? new InMemoryBlobStore();
+  const state = options.state ?? new InMemoryStateStore();
+  const audit = options.audit ?? new MemoryAuditLog();
+  const migrations = nodeMigrations(options.nodes);
+  // Every document that comes in is brought up to date, box by box, before
+  // anything reads it: an old HTTP Request opens and saves as the current one.
+  const load = (value: unknown): WorkflowDocument => migrateNodes(asDocument(value), migrations).document;
+
+  const runs = new RunManager({
+    registry: options.registry,
+    nodes: options.nodes,
+    runs: options.runs,
+    services: { http, credentials, blobs, state },
+  });
   const triggers = new TriggerService({
     workflows: options.workflows,
     activations: options.activations,
@@ -97,7 +166,7 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
         return send(res, 200, options.manifests);
 
       case 'POST /validate': {
-        const document = asDocument(await readBody(req));
+        const document = load(await readBody(req));
         return send(res, 200, { diagnostics: diagnose(document, options.registry) });
       }
 
@@ -110,7 +179,7 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
       case 'POST /workflows': {
         const body = (await readBody(req)) as { name?: unknown; document?: unknown } | null;
         const document: WorkflowDocument = body?.document
-          ? { ...asDocument(body.document), id: newWorkflowId() }
+          ? { ...load(body.document), id: newWorkflowId() }
           : blankWorkflow(typeof body?.name === 'string' && body.name.trim() ? body.name.trim() : 'Untitled workflow');
         return send(res, 201, await options.workflows.put(document));
       }
@@ -118,11 +187,11 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
       case 'GET /workflows/:id': {
         const document = await options.workflows.get(id);
         if (!document) throw new HttpError(404, 'That workflow does not exist. It may have been deleted.');
-        return send(res, 200, migrateDocument(document).document);
+        return send(res, 200, migrateNodes(migrateDocument(document).document, migrations).document);
       }
 
       case 'PUT /workflows/:id': {
-        const document = asDocument(await readBody(req));
+        const document = load(await readBody(req));
         if (document.id !== id) throw new HttpError(400, 'The document id does not match the address it was saved to.');
         // Saved even when it has problems: a half-built workflow is still work
         // worth keeping. Problems block running, not saving.
@@ -158,11 +227,12 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
         // history always points at a version of the workflow that exists.
         let document: WorkflowDocument | undefined;
         if (body?.document) {
-          document = asDocument(body.document);
+          document = load(body.document);
           if (document.id !== id) throw new HttpError(400, 'The document id does not match the workflow being run.');
           document = await options.workflows.put(document);
         } else {
-          document = await options.workflows.get(id);
+          const stored = await options.workflows.get(id);
+          document = stored ? migrateNodes(migrateDocument(stored).document, migrations).document : undefined;
         }
         if (!document) throw new HttpError(404, 'That workflow does not exist.');
         const record = await runs.start(document, body && 'input' in body ? { input: toEnvelope(body.input) } : {});
@@ -178,9 +248,128 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
       case 'GET /runs/:id/events':
         return streamRun(id, res);
 
+      case 'POST /runs/:id/nodes/:id/actions/:id':
+        return send(res, 200, await runAction(id, parts[3] ?? '', parts[5] ?? ''));
+
+      /* ------------------------------------------------------ credentials */
+
+      case 'GET /credential-types':
+        return send(res, 200, credentialTypes.map((t) => t.manifest));
+
+      case 'GET /credentials':
+        return send(res, 200, await credentialStore.list());
+
+      case 'POST /credentials': {
+        const input = credentialInput(await readBody(req), credentialTypes.map((t) => t.manifest));
+        const meta = await credentialStore.create(input);
+        await audit.record({ action: 'credential.created', subject: meta.id, detail: { type: meta.type, name: meta.name } });
+        return send(res, 201, meta);
+      }
+
+      case 'PUT /credentials/:id': {
+        const existing = await credentialStore.get(id);
+        if (!existing) throw new HttpError(404, 'That credential does not exist.');
+        const body = (await readBody(req)) as { name?: unknown; values?: unknown } | null;
+        const name = typeof body?.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 80) : undefined;
+        const values =
+          body?.values !== undefined
+            ? credentialInput({ type: existing.type, name: name ?? existing.name, values: body.values }, credentialTypes.map((t) => t.manifest)).values
+            : undefined;
+        const meta = await credentialStore.replace(id, { ...(name ? { name } : {}), ...(values ? { values } : {}) });
+        // The cached token belongs to the old values; the next box that asks gets a fresh one.
+        credentials.invalidate(id);
+        await audit.record({ action: values ? 'credential.replaced' : 'credential.renamed', subject: id, detail: { name: meta.name } });
+        return send(res, 200, meta);
+      }
+
+      case 'DELETE /credentials/:id': {
+        const deleted = await credentialStore.delete(id);
+        credentials.invalidate(id);
+        if (!deleted) throw new HttpError(404, 'That credential does not exist.');
+        await audit.record({ action: 'credential.deleted', subject: id });
+        return send(res, 200, { deleted: true });
+      }
+
+      /* ------------------------------------------------------------ blobs */
+
+      case 'GET /blobs/:id':
+        return sendBlob(id, url, res);
+
       default:
         throw new HttpError(404, `No such endpoint: ${method} ${url.pathname}`);
     }
+  }
+
+  /**
+   * A person's action on a box in a finished run — "Accept as baseline".
+   * Only here, behind /api's origin guard: a webhook or a schedule can start
+   * a run, but can never accept its results.
+   */
+  async function runAction(runId: string, nodeId: string, actionId: string): Promise<ActionResult> {
+    const detail = await options.runs.get(runId);
+    if (!detail) throw new HttpError(404, 'That run does not exist.');
+    if (detail.record.finishedAt === undefined) throw new HttpError(409, 'Wait for the run to finish first.');
+    const document = (await options.runs.document(runId)) ?? (await options.workflows.get(detail.record.workflowId));
+    const node = document?.nodes.find((n) => n.id === nodeId);
+    if (!document || !node) throw new HttpError(404, 'That box is not part of this run.');
+    const definition = options.nodes.find((d) => d.manifest.type === node.type && d.manifest.version === node.typeVersion);
+    const handler = definition?.actions?.[actionId];
+    if (!handler) throw new HttpError(404, 'That box has no such action.');
+
+    const folded = foldJournal(runId, detail.journal);
+    const finished = Object.values(folded.nodeRuns).some((r) => r.nodeId === nodeId && r.scopePath === '' && r.status === 'succeeded');
+    if (!finished) throw new HttpError(409, 'That box did not finish in this run, so there is nothing to act on.');
+
+    // What the box received and emitted, exactly as the journal recorded it.
+    const input: Record<string, Envelope> = {};
+    for (const edge of document.edges) {
+      if (edge.to.node !== nodeId) continue;
+      const delivered = folded.edges[`${edge.id}#`];
+      if (delivered?.status !== 'delivered') continue;
+      input[edge.to.port] = { items: [...(input[edge.to.port]?.items ?? []), ...delivered.envelope.items] };
+    }
+    const outputs: Record<string, Envelope> = {};
+    for (const [key, envelope] of Object.entries(folded.outputs)) {
+      if (key.startsWith(`${nodeId}:`) && key.endsWith('#')) outputs[key.slice(nodeId.length + 1, -1)] = envelope;
+    }
+
+    const workflowId = detail.record.workflowId;
+    const kv = createScopedKV({ store: state, workflowId, nodeId });
+    const { message } = await handler({ runId, workflowId, nodeId, input, outputs, config: node.config, state: kv });
+    const writes = kv.writes();
+    let conflicts: string[] = [];
+    if (writes.length) ({ conflicts } = await state.apply(workflowId, nodeId, writes, `action:${runId}:${nodeId}:${actionId}:${Date.now()}`));
+    await audit.record({ action: `box.${actionId}`, subject: `${workflowId}/${nodeId}`, detail: { runId, keys: writes.map((w) => w.key), conflicts } });
+    return { message, conflicts };
+  }
+
+  /**
+   * A file a box made, as a download. Always an attachment and never sniffed,
+   * so a stored file can never run as a page on this origin. Images keep
+   * their type so the editor can show them in an `<img>` — which never runs
+   * an SVG's scripts — and carry a sandboxing CSP in case one is opened
+   * directly.
+   */
+  async function sendBlob(key: string, url: URL, res: ServerResponse): Promise<void> {
+    if (!isBlobKey(key)) throw new HttpError(404, 'No such file.');
+    const bytes = await blobs.get(key);
+    if (!bytes) throw new HttpError(404, 'That file is no longer kept.');
+    const type = url.searchParams.get('type') ?? '';
+    const image = ['image/svg+xml', 'image/png'].includes(type);
+    const safe = ['text/markdown', 'text/plain', 'text/csv', 'application/json', 'image/svg+xml'].includes(type)
+      ? `${type}; charset=utf-8`
+      : image
+        ? type
+        : 'application/octet-stream';
+    const name = (url.searchParams.get('name') ?? key.slice(0, 12)).replace(/[^\w.\- ]+/g, '_').slice(0, 100) || 'download';
+    res.writeHead(200, {
+      'content-type': safe,
+      'content-length': bytes.byteLength,
+      'content-disposition': `attachment; filename="${name}"`,
+      'x-content-type-options': 'nosniff',
+      ...(image ? { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}),
+    });
+    res.end(Buffer.from(bytes));
   }
 
   async function streamRun(runId: string, res: ServerResponse): Promise<void> {
@@ -224,7 +413,7 @@ export function createApi(options: ApiOptions): { server: Server; runs: RunManag
     send(res, answer.status, answer.body);
   }
 
-  return { server, runs, triggers };
+  return { server, runs, triggers, credentials };
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -283,6 +472,31 @@ async function readHookBody(req: IncomingMessage): Promise<JsonValue> {
   }
   if (type.startsWith('application/x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(text));
   return text;
+}
+
+/**
+ * Check a credential against its type: a known type, a name, only the
+ * fields it declares, every required one filled in. Defaults fill the rest.
+ */
+function credentialInput(value: unknown, types: CredentialTypeManifest[]): { type: string; name: string; values: Record<string, string> } {
+  const body = value as { type?: unknown; name?: unknown; values?: unknown } | null;
+  const type = types.find((t) => t.type === body?.type);
+  if (!type) throw new HttpError(400, `Unknown credential type ${JSON.stringify(body?.type)}.`);
+  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 80) : '';
+  if (!name) throw new HttpError(400, 'Give the credential a name, so you can tell it apart in the picker.');
+  if (!body?.values || typeof body.values !== 'object' || Array.isArray(body.values)) throw new HttpError(400, 'Send the values as an object of field → text.');
+  const raw = body.values as Record<string, unknown>;
+  const values: Record<string, string> = {};
+  for (const [field, v] of Object.entries(raw)) {
+    if (!type.fields.some((f) => f.name === field)) throw new HttpError(400, `${type.title} has no field "${field}".`);
+    if (typeof v !== 'string') throw new HttpError(400, `"${field}" must be text.`);
+    values[field] = v;
+  }
+  for (const f of type.fields) {
+    if (!values[f.name]?.trim() && f.default !== undefined) values[f.name] = f.default;
+    if (f.required && !values[f.name]?.trim()) throw new HttpError(400, `${f.label ?? f.name} is needed.`);
+  }
+  return { type: type.type, name, values };
 }
 
 function asDocument(value: unknown): WorkflowDocument {

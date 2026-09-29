@@ -1,4 +1,4 @@
-import type { Envelope, JsonValue, NodeId, PortId } from '@goblin/spec';
+import type { Envelope, JsonValue, NodeId, PortId, StateWrite } from '@goblin/spec';
 
 /**
  * Run state, and the journal it is a fold of.
@@ -32,9 +32,13 @@ export interface RunError {
   nodeRunId?: NodeRunId;
 }
 
+/** §11.1: the class decides the policy — retry, fail fast, flag a credential. */
+export type NodeErrorClass = 'transient' | 'rate_limited' | 'auth' | 'validation' | 'permanent' | 'cancelled';
+
 export interface NodeError {
   message: string;
   code?: string;
+  class?: NodeErrorClass;
   /** Whether a retry could plausibly succeed. Set by the executor or classified. */
   retryable?: boolean;
   data?: JsonValue;
@@ -91,6 +95,12 @@ export interface RunState {
   readonly counters: RunCounters;
   readonly error?: RunError;
   readonly output?: Envelope;
+  /**
+   * The trigger this run was started by, when it names one. Wires from the
+   * other triggers are not part of this run, so a box fed by several triggers
+   * waits only for the one that fired.
+   */
+  readonly triggerNode?: NodeId;
   /** Journal position, and the optimistic-concurrency token a driver writes on. */
   readonly seq: number;
 }
@@ -118,7 +128,12 @@ export interface AwaitedSignal {
 export type JournalEntry =
   | { kind: 'RunStarted'; at: number; trigger: Envelope; triggerNode?: NodeId }
   | { kind: 'NodeRunStarted'; at: number; nodeRunId: NodeRunId; nodeId: NodeId; scopePath: ScopePath; attempt: number }
-  | { kind: 'NodeRunSucceeded'; at: number; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope> }
+  /**
+   * `stateWrites`: what the box changed in its `ctx.state`, applied by the
+   * driver once this entry is on disk. Optional and additive — no decision
+   * reads it, and journals written before it existed fold exactly as before.
+   */
+  | { kind: 'NodeRunSucceeded'; at: number; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope>; stateWrites?: StateWrite[] }
   | { kind: 'NodeRunFailed'; at: number; nodeRunId: NodeRunId; error: NodeError }
   | { kind: 'NodeRunSkipped'; at: number; nodeId: NodeId; scopePath: ScopePath; reason: string }
   | { kind: 'EdgeDelivered'; at: number; key: EdgeStateKey; envelope: Envelope }
@@ -131,7 +146,14 @@ export type JournalEntry =
   | { kind: 'SignalAwaited'; at: number; signal: AwaitedSignal }
   | { kind: 'SignalCleared'; at: number; signalId: SignalId }
   | { kind: 'RunStatusChanged'; at: number; status: RunStatus }
-  | { kind: 'RunCompleted'; at: number; status: RunStatus; output?: Envelope; error?: RunError };
+  | { kind: 'RunCompleted'; at: number; status: RunStatus; output?: Envelope; error?: RunError }
+  /**
+   * Written by the driver, not the scheduler: some of a box's state writes
+   * were dropped because another run changed those keys first (their
+   * `ifVersion` no longer matched). A note for the run view; it changes
+   * nothing a fold computes.
+   */
+  | { kind: 'StateWritesDropped'; at: number; nodeRunId: NodeRunId; keys: string[] };
 
 export function initialState(runId: RunId): RunState {
   return {
@@ -165,7 +187,7 @@ export function applyEntry(state: RunState, entry: JournalEntry): RunState {
 
   switch (entry.kind) {
     case 'RunStarted':
-      return { ...state, status: 'running', seq };
+      return { ...state, status: 'running', seq, ...(entry.triggerNode ? { triggerNode: entry.triggerNode } : {}) };
 
     case 'NodeRunStarted':
       return {

@@ -1,0 +1,53 @@
+run started with 1 item(s)
+→ manual
+· morning skipped: a different trigger started this run
+  e_morning pruned: morning emitted nothing on port main
+· deploy skipped: a different trigger started this run
+  e_deploy pruned: deploy emitted nothing on port main
+✓ manual main=1
+  e_manual carried 1
+→ targets
+✓ targets main=1
+  e_split carried 1
+→ split
+✓ split main=15
+  e_measure carried 15
+→ measure
+✓ measure main=14 error=1
+  e_compare carried 14
+  e_failed carried 1
+→ compare
+→ failed
+✓ compare main=7 unpaired=1
+  e_baseline carried 7
+  e_chart carried 7
+→ baseline
+→ chart
+✓ failed main=1
+✓ chart main=1
+✓ baseline main=13 report=1 (saves baseline:projects:old@http://dev.stub, baseline:projects:new@http://dev.stub, baseline:projects:names@http://dev.stub, baseline:users:old@http://dev.stub, baseline:users:new@http://dev.stub, baseline:channel-partners:old@http://dev.stub, baseline:channel-partners:new@http://dev.stub, baseline:buyers:old@http://dev.stub, baseline:buyers:new@http://dev.stub, baseline:cancellations:full@http://dev.stub, baseline:cancellations:list@http://dev.stub, baseline:refunds:full@http://dev.stub, baseline:refunds:list@http://dev.stub)
+  e_ok carried 13
+  e_regression pruned: baseline emitted nothing on port regressions
+  e_report carried 1
+→ ok
+· regression skipped: every required input was pruned
+→ report
+✓ ok main=13
+✓ report main=1
+run succeeded
+  output {"key":"banks","label":"old","url":"http://dev.stub/post-sales/banks/names","status":500,"class":"transient","code":"HTTP_500","message":"HTTP 500 from dev.stub"}
+  output {"key":"projects","label":"old","url":"http://dev.stub/platform/projects/dropdown","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"projects","label":"new","url":"http://dev.stub/platform/projects/autocomplete?limit=20","medianMs":30,"maxMs":30,"bytes":31,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":30}
+  output {"key":"projects","label":"names","url":"http://dev.stub/platform/projects/names","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"users","label":"old","url":"http://dev.stub/platform/users/names","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"users","label":"new","url":"http://dev.stub/platform/users/autocomplete?limit=20","medianMs":30,"maxMs":30,"bytes":31,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":30}
+  output {"key":"channel-partners","label":"old","url":"http://dev.stub/platform/channel-partners/names","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"channel-partners","label":"new","url":"http://dev.stub/platform/channel-partners/autocomplete?limit=20","medianMs":30,"maxMs":30,"bytes":31,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":30}
+  output {"key":"buyers","label":"old","url":"http://dev.stub/post-sales/buyers/names","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"buyers","label":"new","url":"http://dev.stub/post-sales/buyers/autocomplete?limit=20","medianMs":30,"maxMs":30,"bytes":31,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":30}
+  output {"key":"cancellations","label":"full","url":"http://dev.stub/post-sales/cancellations?page=0&size=50","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"cancellations","label":"list","url":"http://dev.stub/post-sales/cancellations?page=0&size=50&view=list","medianMs":120,"maxMs":120,"bytes":1080,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":120}
+  output {"key":"refunds","label":"full","url":"http://dev.stub/post-sales/cancellations/refunds?page=0&size=50","medianMs":180,"maxMs":180,"bytes":5440,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":180}
+  output {"key":"refunds","label":"list","url":"http://dev.stub/post-sales/cancellations/refunds?page=0&size=50&view=list","medianMs":120,"maxMs":120,"bytes":1080,"status":200,"verdict":"baseline created","remeasured":false,"newBaselineMs":120}
+  output {"title":"Endpoint latency — BM-1496","environment":"http://dev.stub","targets":13,"regressions":0,"created":13,"summary":"13 targets: no regressions"}
+  output {"title":"BM-1496: before and after","metric":"time","pairs":7,"faster":7,"slower":0,"same":0}

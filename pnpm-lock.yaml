@@ -67,9 +67,15 @@ importers:
 
   packages/expressions: {}
 
+  packages/fn: {}
+
   packages/graph: {}
 
   packages/node-sdk: {}
+
+  packages/nodes-aws: {}
+
+  packages/nodes-bench: {}
 
   packages/nodes-core: {}
 

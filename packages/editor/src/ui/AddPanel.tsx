@@ -9,7 +9,7 @@ import { BOX_DRAG_TYPE } from './Canvas.js';
 import { Icon } from './icons.js';
 import { useEditor, useEditorStore } from './context.js';
 
-const ORDER = ['start', 'logic', 'data', 'loops', 'actions', 'timing', 'other'];
+const ORDER = ['start', 'logic', 'data', 'loops', 'actions', 'measure', 'timing', 'other'];
 
 /**
  * The palette: every box the app knows, built from manifests alone (§15.1).
@@ -26,7 +26,12 @@ export function AddPanel({ from, at }: { from?: { node: string; port: string }; 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
     const byGroup = new Map<string, typeof manifests>();
+    // Older versions stay registered so old workflows run, but only the
+    // newest version of each box is offered for new work.
+    const newest = new Map<string, number>();
+    for (const m of manifests) newest.set(m.type, Math.max(newest.get(m.type) ?? 0, m.version));
     for (const m of manifests) {
+      if (m.version !== newest.get(m.type)) continue;
       // Growing the flow from a box can't add a trigger: nothing feeds into one.
       if (from && m.trigger) continue;
       if (q && !`${m.title} ${m.description ?? ''}`.toLowerCase().includes(q)) continue;

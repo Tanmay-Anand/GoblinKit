@@ -93,3 +93,23 @@ export interface ApiError {
   error: string;
   diagnostics?: Diagnostic[];
 }
+
+/* ------------------------------------------------------------ credentials */
+
+/** A saved credential as the browser sees it: its name and type, never its values. */
+export type { CredentialMeta as CredentialSummary, CredentialStatus } from '@goblin/node-sdk';
+export type { CredentialTypeManifest } from '@goblin/spec';
+
+/** POST /api/credentials. Every value is write-only: it is never sent back. */
+export interface CredentialInput {
+  type: string;
+  name: string;
+  values: Record<string, string>;
+}
+
+/** What a run-view action (Accept as baseline) did. */
+export interface ActionResult {
+  message: string;
+  /** Keys another run changed first; those writes were dropped. */
+  conflicts: string[];
+}

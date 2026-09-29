@@ -215,7 +215,8 @@ export type DiagnosticCode =
   | 'PORT_OVERSUBSCRIBED'
   | 'DUPLICATE_ID'
   | 'NO_TRIGGER'
-  | 'SCOPE_UNBALANCED';
+  | 'SCOPE_UNBALANCED'
+  | 'MISSING_CREDENTIAL';
 
 export interface Diagnostic {
   severity: 'error' | 'warning' | 'info';
@@ -262,7 +263,99 @@ export interface NodeManifest {
   /** Present only on scope nodes, which the engine treats specially. */
   scope?: ScopeSpec;
   defaults?: { policy?: Partial<NodePolicy> };
+  /**
+   * `perItem` only: at most this many items in flight at once (§6.4's
+   * `concurrency`). `1` means strictly one after another, which is what a
+   * box that measures latency needs so its requests never share the wire.
+   * Every driver must honour it, including the future runtime-owned loop.
+   */
+  maxConcurrency?: number;
+  /**
+   * Credentials the box can use, by slot. Each slot says which capabilities
+   * it accepts (`httpAuth@1`, …); the editor offers only credentials whose
+   * type provides one of them.
+   */
+  credentials?: CredentialSlot[];
+  /**
+   * Actions a person can take on this box in a finished run, shown as
+   * buttons in the run view — "Accept as baseline". Data here, handler on
+   * the server; never something a trigger can do.
+   */
+  actions?: NodeActionSpec[];
 }
+
+export interface CredentialSlot {
+  /** The key in `NodeInstance.credentials`. */
+  name: string;
+  label?: string;
+  /** Capability ids, versioned: 'httpAuth@1', 'aws.sigv4@1'. */
+  accepts: string[];
+  required?: boolean;
+  description?: string;
+}
+
+export interface NodeActionSpec {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Credential types
+ *
+ * Like a node manifest, a credential type is data the browser can have: it
+ * says which fields to ask for and which of them are secret. What turns the
+ * values into something usable — a header, a signed request, a fresh token —
+ * is a resolver that runs only on the server (node-sdk's
+ * defineCredentialResolver). A pack ships both, the way it ships a node.
+ * ------------------------------------------------------------------------ */
+
+export interface CredentialField {
+  name: string;
+  label?: string;
+  /** Secret fields are encrypted, never shown again, and scrubbed from logs. */
+  secret?: boolean;
+  required?: boolean;
+  description?: string;
+  type?: 'string' | 'select';
+  options?: string[];
+  default?: string;
+}
+
+export interface CredentialTypeManifest {
+  /** Dotted namespace, like a node type: 'http.bearerToken', 'aws.cognito.refreshToken'. */
+  type: string;
+  version: number;
+  title: string;
+  description?: string;
+  /** The capabilities its resolved value satisfies, versioned: ['httpAuth@1']. */
+  provides: string[];
+  fields: CredentialField[];
+}
+
+/**
+ * The capabilities the kit defines. Any other capability belongs to a pack
+ * and must be namespaced ('aws.sigv4@1'), so two packs cannot mean different
+ * things by the same name.
+ */
+export const CORE_CAPABILITIES = ['httpAuth@1', 'httpSigner@1'] as const;
+
+/* ------------------------------------------------------------------------ *
+ * Box state
+ * ------------------------------------------------------------------------ */
+
+/**
+ * A change a box made to its small durable store (`ctx.state`), recorded on
+ * its success in the journal and applied by the driver afterwards. Plain
+ * data, because it travels in the journal.
+ *
+ * `ifVersion` makes the write conditional: 'absent' creates only; a number
+ * must equal the stored version. A write whose condition fails is dropped,
+ * never merged — two runs overlapping must not both win.
+ */
+export type StateWrite =
+  | { op: 'set'; key: string; value: JsonValue; ifVersion?: number | 'absent' }
+  | { op: 'delete'; key: string; ifVersion?: number };
 
 export interface ConfigField {
   name: string;

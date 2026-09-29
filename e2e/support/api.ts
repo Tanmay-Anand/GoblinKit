@@ -15,6 +15,7 @@ import type { WorkflowDocument } from '../../packages/spec/src/index.js';
  */
 export class GoblinApi {
   private readonly created: string[] = [];
+  private readonly credentials: string[] = [];
 
   constructor(private readonly request: APIRequestContext) {}
 
@@ -53,11 +54,13 @@ export class GoblinApi {
   }
 
   /** Start a run without the canvas, and wait for it to finish. */
-  async runToEnd(workflowId: string): Promise<RunRecord> {
+  async runToEnd(workflowId: string, options: { timeout?: number } = {}): Promise<RunRecord> {
     const res = await this.request.post(`/api/workflows/${workflowId}/runs`, { data: {} });
     expect(res.status(), await res.text()).toBe(202);
     const { runId } = (await res.json()) as RunRecord;
-    await expect.poll(async () => (await this.runs(workflowId)).find((r) => r.runId === runId)?.finishedAt).toBeTruthy();
+    await expect
+      .poll(async () => (await this.runs(workflowId)).find((r) => r.runId === runId)?.finishedAt, { timeout: options.timeout ?? 7_000 })
+      .toBeTruthy();
     return (await this.runs(workflowId)).find((r) => r.runId === runId)!;
   }
 
@@ -73,6 +76,26 @@ export class GoblinApi {
     return { status: res.status(), body: await res.json() };
   }
 
+  /** Save a credential; returns the reference a box's settings hold. */
+  async createCredential(type: string, name: string, values: Record<string, string>): Promise<{ id: string; type: string }> {
+    const res = await this.request.post('/api/credentials', { data: { type, name, values } });
+    expect(res.status(), await res.text()).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    this.credentials.push(id);
+    return { id, type };
+  }
+
+  async deleteCredential(id: string): Promise<void> {
+    expect((await this.request.delete(`/api/credentials/${id}`)).status()).toBe(200);
+  }
+
+  /** A credential made on its screen, found by name so it is cleaned up too. */
+  async adoptCredential(name: string): Promise<void> {
+    const res = await this.request.get('/api/credentials');
+    const found = ((await res.json()) as { id: string; name: string }[]).find((c) => c.name === name);
+    if (found) this.credentials.push(found.id);
+  }
+
   /** Clean up a workflow the test created through the UI rather than through here. */
   adopt(workflowId: string): void {
     this.created.push(workflowId);
@@ -81,6 +104,7 @@ export class GoblinApi {
   /** Delete everything this test created (which also switches it off). Called by the fixture after each test. */
   async cleanUp(): Promise<void> {
     for (const id of this.created) await this.request.delete(`/api/workflows/${id}`);
+    for (const id of this.credentials) await this.request.delete(`/api/credentials/${id}`);
   }
 
   private track(doc: WorkflowDocument): WorkflowDocument {

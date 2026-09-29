@@ -1,4 +1,4 @@
-import type { CredentialRef, Envelope, JsonObject, JsonValue, NodeId, NodeTypeId, PortId } from '@goblin/spec';
+import type { CredentialRef, Envelope, JsonObject, JsonValue, NodeId, NodeTypeId, PortId, StateWrite } from '@goblin/spec';
 import type { NodeError, NodeRunId, RunId, RunStatus, ScopePath, SignalId, TimerId } from './state.js';
 
 /**
@@ -50,7 +50,8 @@ export type RunEvent =
    * others are skipped along with anything only they feed.
    */
   | { kind: 'RunStarted'; trigger: Envelope; triggerNode?: NodeId }
-  | { kind: 'NodeSucceeded'; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope> }
+  /** `stateWrites` is carried onto the journal entry untouched (see NodeRunSucceeded). */
+  | { kind: 'NodeSucceeded'; nodeRunId: NodeRunId; outputs: Record<PortId, Envelope>; stateWrites?: StateWrite[] }
   | { kind: 'NodeFailed'; nodeRunId: NodeRunId; error: NodeError }
   | { kind: 'TimerFired'; timerId: TimerId }
   | { kind: 'SignalReceived'; signalId: SignalId; payload: JsonValue }

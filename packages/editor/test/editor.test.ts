@@ -25,6 +25,10 @@ const nullBackend: EditorBackend = {
   },
   getActivation: async (workflowId) => ({ workflowId, active: false, triggers: [] }),
   setActive: async (workflowId, active) => ({ workflowId, active, triggers: [] }),
+  listCredentials: async () => [],
+  listCredentialTypes: async () => [],
+  runAction: async () => ({ message: '', conflicts: [] }),
+  blobUrl: (ref) => `/blobs/${ref.key}`,
 };
 
 const registry = new MapRegistry(coreManifests);

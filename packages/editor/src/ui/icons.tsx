@@ -16,6 +16,10 @@ const PATHS: Record<Glyph | UiIcon, string> = {
   stop: 'M6 6h12v12H6z',
   clock: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z M12 7v5l3 2',
   box: 'M4 7l8-4 8 4v10l-8 4-8-4z M4 7l8 4 8-4 M12 11v10',
+  split: 'M4 12h6 M10 12c3 0 4-6 8-6h2 M10 12h10 M10 12c3 0 4 6 8 6h2',
+  gauge: 'M4 17a8 8 0 1 1 16 0 M12 17l4-5 M7.5 12.5l.5.5 M12 9v.5',
+  compare: 'M7 4v16 M17 4v16 M7 8h4 M7 14h2 M17 10h-4 M17 16h-2',
+  target: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8z M12 12h.01',
   // interface
   back: 'M15 18l-6-6 6-6',
   chevronDown: 'M6 9l6 6 6-6',
@@ -37,11 +41,16 @@ const PATHS: Record<Glyph | UiIcon, string> = {
   rotateLeft: 'M4 11a8 8 0 1 1 2.3 5.7 M4 4v7h7',
   fit: 'M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5',
   settings: 'M4 7h10 M18 7h2 M4 17h4 M12 17h8 M14 5v4 M8 15v4',
+  key: 'M8 15a4 4 0 1 0 0-8a4 4 0 1 0 0 8z M11 11h10 M17 11v3 M20 11v2',
+  download: 'M12 4v11 M7 10l5 5 5-5 M5 20h14',
+  lock: 'M6 11h12v9H6z M9 11V8a3 3 0 0 1 6 0v3',
+  braces: 'M9 4c-2 0-2.5 1-2.5 3s0 3.5-2 5c2 1.5 2 3 2 5s.5 3 2.5 3 M15 4c2 0 2.5 1 2.5 3s0 3.5 2 5c-2 1.5-2 3-2 5s-.5 3-2.5 3',
 };
 
 export type UiIcon =
   | 'back' | 'chevronDown' | 'chevronUp' | 'plus' | 'undo' | 'redo' | 'x' | 'search' | 'grid' | 'layout'
-  | 'alert' | 'check' | 'trash' | 'spinner' | 'dash' | 'keyboard' | 'rotateRight' | 'rotateLeft' | 'fit' | 'settings';
+  | 'alert' | 'check' | 'trash' | 'spinner' | 'dash' | 'keyboard' | 'rotateRight' | 'rotateLeft' | 'fit' | 'settings'
+  | 'key' | 'download' | 'lock' | 'braces';
 
 export function Icon({ name, size = 16, className }: { name: Glyph | UiIcon; size?: number; className?: string }) {
   const filled = name === 'play';

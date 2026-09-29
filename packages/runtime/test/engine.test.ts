@@ -137,6 +137,31 @@ describe('a workflow with more than one trigger', () => {
     const { log } = drive(document, (id) => ok(main({ from: id })));
     expect(log.slice(0, 2)).toEqual(['invoke manual', 'invoke timer']);
   });
+  it('runs a box wired straight to several triggers with whichever fired', () => {
+    // Before, 'all' waited for the wires of the triggers that did not fire,
+    // which never came — the box was silently left out of a "succeeded" run.
+    const shared = doc(
+      [
+        node('manual', 'core.trigger.manual'),
+        node('timer', 'core.trigger.schedule', { repeat: 'minutes', every: 5 }),
+        node('hook', 'core.trigger.webhook'),
+        node('targets', 'core.transform.set', { values: { a: 1 } }),
+        node('onlyHook', 'core.log'),
+      ],
+      [
+        edge('e1', 'manual', 'main', 'targets'),
+        edge('e2', 'timer', 'main', 'targets'),
+        edge('e3', 'hook', 'main', 'targets'),
+        edge('e4', 'hook', 'main', 'onlyHook'),
+      ],
+    );
+    const { state, log } = drive(shared, (id) => ok(main({ from: id })), { triggerNode: 'timer' });
+    expect(log).toEqual(['invoke timer', 'invoke targets']);
+    expect(state.status).toBe('succeeded');
+    // A box only a non-firing trigger feeds is still skipped, not left pending.
+    expect(Object.values(state.nodeRuns).map((r) => r.nodeId)).not.toContain('onlyHook');
+    expect(state.edges['e4#']?.status).toBe('pruned');
+  });
 });
 
 describe('branching by pruning', () => {

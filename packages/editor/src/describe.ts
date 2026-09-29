@@ -8,7 +8,24 @@
 
 import type { JsonValue, NodeInstance, NodeManifest } from '@goblin/spec';
 
-export type Glyph = 'hook' | 'play' | 'branch' | 'switch' | 'merge' | 'set' | 'globe' | 'note' | 'loop' | 'repeat' | 'stop' | 'clock' | 'box';
+export type Glyph =
+  | 'hook'
+  | 'play'
+  | 'branch'
+  | 'switch'
+  | 'merge'
+  | 'set'
+  | 'split'
+  | 'globe'
+  | 'note'
+  | 'loop'
+  | 'repeat'
+  | 'stop'
+  | 'clock'
+  | 'box'
+  | 'gauge'
+  | 'compare'
+  | 'target';
 
 export interface Category {
   id: string;
@@ -24,6 +41,7 @@ export const CATEGORIES: Record<string, Category> = {
   loops: { id: 'loops', title: 'Loops', hue: '#168f9c', tint: '#dff2f4' },
   actions: { id: 'actions', title: 'Actions', hue: '#1f84cc', tint: '#e1eff9' },
   timing: { id: 'timing', title: 'Timing', hue: '#c28a12', tint: '#f8f0d9' },
+  measure: { id: 'measure', title: 'Measure', hue: '#c2456b', tint: '#fbe6ed' },
   other: { id: 'other', title: 'Other', hue: '#6b7280', tint: '#eef0f2' },
 };
 
@@ -35,6 +53,10 @@ const BY_TYPE: Record<string, { category: string; glyph: Glyph }> = {
   'core.control.switch': { category: 'logic', glyph: 'switch' },
   'core.control.merge': { category: 'logic', glyph: 'merge' },
   'core.transform.set': { category: 'data', glyph: 'set' },
+  'core.transform.split': { category: 'data', glyph: 'split' },
+  'bench.http.measure': { category: 'measure', glyph: 'gauge' },
+  'bench.compare': { category: 'measure', glyph: 'compare' },
+  'bench.baseline': { category: 'measure', glyph: 'target' },
   'core.scope.forEach': { category: 'loops', glyph: 'loop' },
   'core.scope.while': { category: 'loops', glyph: 'repeat' },
   'core.scope.end': { category: 'loops', glyph: 'stop' },
@@ -96,6 +118,17 @@ export function summarize(node: NodeInstance, manifest: NodeManifest | undefined
       return `Waits ${humanMs(Number(c['ms'] ?? 0))}`;
     case 'core.log':
       return c['message'] ? stripBraces(str(c['message'])) : 'Records the items';
+    case 'core.transform.split':
+      return `One item per entry of ${stripBraces(str(c['list'] ?? '{{ $json.items }}'))}`;
+    case 'bench.http.measure': {
+      const runs = Number(c['runs'] ?? 5);
+      const warm = Number(c['warmupRuns'] ?? 1);
+      return `${warm ? `${warm} warm-up, then ` : ''}${runs} timed request${runs === 1 ? '' : 's'} per endpoint`;
+    }
+    case 'bench.compare':
+      return 'Pairs old with new, full with list';
+    case 'bench.baseline':
+      return `Alerts at +${Number(c['regressionPct'] ?? 20)}% over each baseline`;
     default:
       return manifest?.description ?? '';
   }
@@ -106,6 +139,8 @@ export function portLabel(nodeType: string, port: string): string {
   if (port === 'main') return '';
   if (nodeType === 'core.control.switch' && /^\d+$/.test(port)) return `case ${Number(port) + 1}`;
   if (nodeType === 'core.control.merge') return port === 'a' ? 'first' : port === 'b' ? 'second' : port;
+  if (nodeType === 'bench.http.measure' && port === 'error') return 'could not measure';
+  if (nodeType === 'bench.compare' && port === 'unpaired') return 'no partner';
   return port;
 }
 
@@ -117,7 +152,12 @@ export function portHue(port: string): string {
     case 'false':
       return '#e0892a';
     case 'error':
+    case 'regressions':
       return '#d24c4c';
+    case 'report':
+      return '#c2456b';
+    case 'unpaired':
+      return '#e0892a';
     case 'item':
       return '#168f9c';
     case 'done':

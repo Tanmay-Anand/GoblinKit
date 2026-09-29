@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { compile, type CompiledGraph } from '@goblin/graph';
 import {
   advance,
+  applyEntry,
   foldJournal,
   initialState,
   type Command,
@@ -21,8 +22,30 @@ import {
   type RunState,
   type SchedulerContext,
 } from '@goblin/runtime';
-import { makeContext, NodeFailure, type NodeDefinition } from '@goblin/node-sdk';
-import type { Envelope, JsonValue, ManifestRegistry, WorkflowDocument } from '@goblin/spec';
+import {
+  createScopedKV,
+  makeContext,
+  NodeFailure,
+  redact,
+  type BlobStore,
+  type CredentialProvider,
+  type MeteredHttpClient,
+  type NodeDefinition,
+  type StateStore,
+} from '@goblin/node-sdk';
+import type { Envelope, JsonValue, ManifestRegistry, StateWrite, WorkflowDocument } from '@goblin/spec';
+
+/**
+ * The platform capabilities boxes reach through `ctx` (§12.2). Each is
+ * optional: without one, a box gets a local stand-in (a plain HTTP client,
+ * blobs in memory, state that is never committed, no credentials).
+ */
+export interface RunServices {
+  http?: MeteredHttpClient;
+  credentials?: CredentialProvider;
+  blobs?: BlobStore;
+  state?: StateStore;
+}
 
 export interface RunOptions {
   document: WorkflowDocument;
@@ -43,6 +66,12 @@ export interface RunOptions {
   onLog?: (line: { level: string; node: string; message: string; data?: JsonValue }) => void;
   /** Fixed clock, for deterministic tests and golden files. */
   clock?: () => number;
+  services?: RunServices;
+  /**
+   * Resolves once every entry handed to `onJournal` so far is durable. State
+   * writes wait for it, so the store never holds a write the journal lacks.
+   */
+  durable?: () => Promise<void>;
 }
 
 export interface RunResult {
@@ -57,6 +86,7 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
   const executors = new Map(options.nodes.map((n) => [`${n.manifest.type}@${n.manifest.version}`, n]));
 
   const inFlight = new Set<Promise<void>>();
+  const services = options.services ?? {};
   const timers = new Map<string, { fireAt: number; cancel?: () => void }>();
   const clock = options.clock ?? (() => Date.now());
 
@@ -66,6 +96,12 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
   if (options.resume) {
     ({ state } = resumeFrom(runId, options.resume.journal, pending, timers));
     journal.push(...options.resume.journal);
+    // The journal may say a box succeeded while its state writes never
+    // reached the store: the process stopped in between. Applying them again
+    // closes that window; the store skips any it already has.
+    for (const entry of options.resume.journal) {
+      if (entry.kind === 'NodeRunSucceeded' && entry.stateWrites?.length) applyState(entry.nodeRunId, entry.stateWrites, false);
+    }
   } else {
     pending.push({
       kind: 'RunStarted',
@@ -105,6 +141,9 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
       for (const command of transition.commands) {
         dispatch(command);
       }
+      for (const entry of transition.journal) {
+        if (entry.kind === 'NodeRunSucceeded' && entry.stateWrites?.length) applyState(entry.nodeRunId, entry.stateWrites, true);
+      }
       if (state.status === 'succeeded' || state.status === 'failed' || state.status === 'cancelled') {
         // Timers for a finished run are dropped rather than awaited: a failed
         // run must not keep the process alive for a retry nobody wants.
@@ -126,6 +165,34 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
 
   return { state, journal, graph };
 
+  /**
+   * Commit a box's state writes: after its success is durable in the
+   * journal, never before, so a crash can lose a write the journal can
+   * replay but never keep one the journal does not know about. Writes whose
+   * version check fails are dropped, and the run says so.
+   */
+  function applyState(nodeRunId: string, writes: StateWrite[], waitForJournal: boolean): void {
+    const store = services.state;
+    const nodeId = state.nodeRuns[nodeRunId]?.nodeId;
+    if (!store || !nodeId) return;
+    const task: Promise<void> = (async () => {
+      if (waitForJournal) await options.durable?.();
+      const result = await store.apply(options.document.id, nodeId, writes, nodeRunId);
+      if (!result.conflicts.length) return;
+      const entry: JournalEntry = { kind: 'StateWritesDropped', at: clock(), nodeRunId, keys: result.conflicts };
+      state = applyEntry(state, entry);
+      journal.push(entry);
+      options.onJournal?.([entry]);
+    })()
+      .catch((error: unknown) => {
+        options.onLog?.({ level: 'warn', node: nodeId, message: `Could not save this box's state: ${error instanceof Error ? error.message : String(error)}` });
+      })
+      .finally(() => {
+        inFlight.delete(task);
+      });
+    inFlight.add(task);
+  }
+
   function dispatch(command: Command): void {
     switch (command.kind) {
       case 'InvokeNode': {
@@ -141,6 +208,19 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
         }
 
         const controller = new AbortController();
+        const manifest = options.registry.get(invocation.type, invocation.typeVersion);
+        // What this invocation resolved from its credentials: the exact
+        // values to scrub from its logs and its error message (§14.2).
+        const secrets = new Set<string>();
+        const scrub = <T extends JsonValue | string>(value: T): T => redact(value, secrets);
+        const kv = createScopedKV({
+          ...(services.state ? { store: services.state } : {}),
+          workflowId: options.document.id,
+          nodeId: invocation.nodeId,
+        });
+        const log = (level: string, message: string, data: JsonValue | undefined): void => {
+          options.onLog?.({ level, node: invocation.nodeId, message: scrub(message), ...(data !== undefined ? { data: scrub(data) } : {}) });
+        };
         const task = (async () => {
           try {
             const ctx = makeContext({
@@ -150,20 +230,40 @@ export async function runWorkflow(options: RunOptions): Promise<RunResult> {
               idempotencyKey: invocation.idempotencyKey,
               input: invocation.input,
               config: invocation.config,
+              ...(manifest ? { manifest } : {}),
               credentials: invocation.credentials,
               signal: controller.signal,
               variables: options.document.variables ?? {},
               nodeOutputs: nodeOutputsFor(state),
               logger: {
-                debug: (message, data) => options.onLog?.({ level: 'debug', node: invocation.nodeId, message, ...(data !== undefined ? { data } : {}) }),
-                info: (message, data) => options.onLog?.({ level: 'info', node: invocation.nodeId, message, ...(data !== undefined ? { data } : {}) }),
-                warn: (message, data) => options.onLog?.({ level: 'warn', node: invocation.nodeId, message, ...(data !== undefined ? { data } : {}) }),
+                debug: (message, data) => log('debug', message, data),
+                info: (message, data) => log('info', message, data),
+                warn: (message, data) => log('warn', message, data),
+              },
+              run: { id: runId, workflowId: options.document.id },
+              ...(services.http ? { http: services.http } : {}),
+              ...(services.blobs ? { blobs: services.blobs } : {}),
+              state: kv,
+              credential: async (slot) => {
+                const ref = invocation.credentials[slot]!;
+                if (!services.credentials) {
+                  throw new NodeFailure('This box uses a credential, and credentials are not available here.', {
+                    code: 'NO_CREDENTIALS',
+                    errorClass: 'permanent',
+                  });
+                }
+                const accepts = manifest?.credentials?.find((c) => c.name === slot)?.accepts ?? [];
+                const { secrets: found, ...resolved } = await services.credentials.resolve(ref, { accepts, signal: controller.signal });
+                for (const value of found) secrets.add(value);
+                return resolved;
               },
             });
             const outputs = await definition.execute(ctx);
-            deliver({ kind: 'NodeSucceeded', nodeRunId: invocation.nodeRunId, outputs });
+            const stateWrites = kv.writes();
+            deliver({ kind: 'NodeSucceeded', nodeRunId: invocation.nodeRunId, outputs, ...(stateWrites.length ? { stateWrites } : {}) });
           } catch (error) {
-            deliver({ kind: 'NodeFailed', nodeRunId: invocation.nodeRunId, error: classify(error) });
+            const classified = classify(error);
+            deliver({ kind: 'NodeFailed', nodeRunId: invocation.nodeRunId, error: { ...classified, message: scrub(classified.message) } });
           }
         })().finally(() => {
           inFlight.delete(task);
@@ -264,6 +364,7 @@ function classify(error: unknown): NodeError {
       message: error.message,
       retryable: error.retryable,
       ...(error.code ? { code: error.code } : {}),
+      ...(error.errorClass ? { class: error.errorClass } : {}),
     };
   }
   if (error instanceof Error) {

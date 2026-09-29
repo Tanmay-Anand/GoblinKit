@@ -85,3 +85,13 @@ describe('what expressions cannot do', () => {
     expect(() => evaluate('"unterminated', {})).toThrow(/Unterminated string/);
   });
 });
+
+describe('the shared function library', () => {
+  it('computes statistics over item data, the same way node packs do', () => {
+    const ctx = { json: { runs: [120, 80, 100, 95, 300] } };
+    expect(resolveValue('{{ median($json.runs) }}', ctx)).toBe(100);
+    expect(resolveValue('{{ percentile($json.runs, 100) }}', ctx)).toBe(300);
+    expect(resolveValue('{{ min(slice($json.runs, 1)) }}', ctx)).toBe(80);
+    expect(resolveValue('{{ sum(pluck($items, "ms")) }}', { items: [{ ms: 2 }, { ms: 3 }] })).toBe(5);
+  });
+});

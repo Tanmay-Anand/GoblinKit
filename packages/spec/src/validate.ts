@@ -202,6 +202,17 @@ export function validateDocument(
         });
       }
     }
+    // A required credential slot left empty is marked on the box, like a
+    // required field: it can only fail at run time, after earlier boxes ran.
+    for (const slot of manifest.credentials ?? []) {
+      if (!slot.required || node.credentials?.[slot.name]) continue;
+      out.push({
+        severity: 'error',
+        code: 'MISSING_CREDENTIAL',
+        path: ['nodes', index, 'credentials', slot.name],
+        message: `${node.label ?? node.id} needs a credential picked for ${slot.label ?? slot.name}.`,
+      });
+    }
   });
 
   // --- there has to be somewhere to start --------------------------------

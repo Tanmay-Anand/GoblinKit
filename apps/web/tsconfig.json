@@ -7,6 +7,7 @@
     "baseUrl": "../..",
     "paths": {
       "@goblin/spec": ["packages/spec/src/index.ts"],
+      "@goblin/fn": ["packages/fn/src/index.ts"],
       "@goblin/graph": ["packages/graph/src/index.ts"],
       "@goblin/expressions": ["packages/expressions/src/index.ts"],
       "@goblin/runtime": ["packages/runtime/src/index.ts"],

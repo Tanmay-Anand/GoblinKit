@@ -20,11 +20,14 @@
     "baseUrl": ".",
     "paths": {
       "@goblin/spec": ["packages/spec/src/index.ts"],
+      "@goblin/fn": ["packages/fn/src/index.ts"],
       "@goblin/graph": ["packages/graph/src/index.ts"],
       "@goblin/expressions": ["packages/expressions/src/index.ts"],
       "@goblin/runtime": ["packages/runtime/src/index.ts"],
       "@goblin/node-sdk": ["packages/node-sdk/src/index.ts"],
       "@goblin/nodes-core": ["packages/nodes-core/src/index.ts"],
+      "@goblin/nodes-aws": ["packages/nodes-aws/src/index.ts"],
+      "@goblin/nodes-bench": ["packages/nodes-bench/src/index.ts"],
       "@goblin/drivers-inprocess": ["packages/drivers-inprocess/src/index.ts"],
       "@goblin/testing": ["packages/testing/src/index.ts"],
       "@goblin/api/protocol": ["apps/api/src/protocol.ts"]

@@ -14,13 +14,22 @@
  * slept would give away both.
  */
 
-import { defineExecutor, defineManifest, NodeFailure, type NodeDefinition } from '@goblin/node-sdk';
+import {
+  classifyHttpStatus,
+  defineExecutor,
+  defineManifest,
+  networkFailure as describeNetworkFailure,
+  NodeFailure,
+  type HttpMethod,
+  type NodeDefinition,
+} from '@goblin/node-sdk';
 import { evaluate } from '@goblin/expressions';
 import type { Item, JsonObject, JsonValue, NodeManifest } from '@goblin/spec';
 
 import { WEEKDAYS } from './schedule.js';
 
 export { describeSchedule, nextFire, parseCron, scheduleSettings, toCron, type ScheduleSettings } from './schedule.js';
+export { basicAuthType, bearerTokenType, coreCredentialResolvers, coreCredentialTypes, headerKeyType, queryKeyType } from './credentials.js';
 
 /* ------------------------------------------------------------------ manual */
 
@@ -175,6 +184,57 @@ const setNode = defineExecutor(setManifest, (ctx) => {
   return ctx.emit('main', out);
 });
 
+/* ------------------------------------------------------------------- split */
+
+export const splitManifest = defineManifest({
+  type: 'core.transform.split',
+  version: 1,
+  title: 'Split list',
+  group: 'transform',
+  description: 'Turn a list inside an item into one item per entry.',
+  executionMode: 'batch',
+  ports: {
+    inputs: [{ id: 'main', required: true, join: 'all' }],
+    outputs: [{ id: 'main' }],
+  },
+  config: {
+    fields: [
+      {
+        name: 'list',
+        label: 'List',
+        type: 'expression',
+        required: true,
+        default: '{{ $json.items }}',
+        description: 'The list to split, e.g. {{ $json.targets }}. Each entry becomes an item; an entry that is not an object arrives as { value }.',
+      },
+    ],
+  },
+});
+
+/**
+ * The missing half of Set: Set makes one item from each item, and this makes
+ * many. Lineage points every new item at the one it came out of.
+ */
+const splitNode = defineExecutor(splitManifest, (ctx) => {
+  const out: Item[] = [];
+  ctx.items.forEach((item, index) => {
+    const { list } = ctx.resolveConfig<{ list?: JsonValue }>({ json: item.data, items: ctx.items.map((i) => i.data) });
+    if (!Array.isArray(list)) {
+      throw new NodeFailure(`“List” is not a list here (it is ${list === null || list === undefined ? 'empty' : typeof list}). Point it at one, like {{ $json.targets }}.`, {
+        code: 'NOT_A_LIST',
+        errorClass: 'validation',
+      });
+    }
+    for (const entry of list) {
+      out.push({
+        data: entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : { value: entry },
+        lineage: [{ sourceNode: ctx.nodeId, sourcePort: 'main', itemIndex: index }],
+      });
+    }
+  });
+  return ctx.emit('main', out);
+});
+
 /* ---------------------------------------------------------------------- if */
 
 export const ifManifest = defineManifest({
@@ -289,7 +349,12 @@ const mergeNode = defineExecutor(mergeManifest, (ctx) => {
 
 /* -------------------------------------------------------------------- http */
 
-export const httpManifest = defineManifest({
+/**
+ * Version 1, kept so a workflow saved with it still runs as it did. Opening
+ * such a workflow upgrades the box to version 2 (below), whose settings are
+ * a superset of these.
+ */
+export const httpManifestV1 = defineManifest({
   type: 'core.http.request',
   version: 1,
   title: 'HTTP Request',
@@ -318,7 +383,7 @@ export const httpManifest = defineManifest({
   defaults: { policy: { retry: { maxAttempts: 3, backoffMs: 500, maxBackoffMs: 30_000 } } },
 });
 
-const httpNode = defineExecutor(httpManifest, async (ctx) => {
+const httpNodeV1 = defineExecutor(httpManifestV1, async (ctx) => {
   const out: Item[] = [];
   for (const [index, item] of ctx.items.entries()) {
     const cfg = ctx.resolveConfig<{
@@ -390,53 +455,114 @@ const httpNode = defineExecutor(httpManifest, async (ctx) => {
   return ctx.emit('main', out);
 });
 
-/**
- * Say why a request never got an answer.
- *
- * Node's fetch reports every network problem as "fetch failed" and hides the
- * reason in `cause`. That sentence is useless on a box marked red, so the
- * common causes are named, with the host, in words a person can act on.
- */
+/** Version 1 called fetch itself; the wording of its failures is the SDK's now. */
 function networkFailure(error: unknown, url: string, timeoutMs: number, timedOut: boolean): NodeFailure {
-  let host = url;
+  let host: string;
   try {
     host = new URL(url).host;
   } catch {
     return new NodeFailure(`"${url}" is not a valid address.`, { code: 'BAD_URL', retryable: false });
   }
-  if (timedOut) return new NodeFailure(`${host} did not answer within ${timeoutMs / 1000} s.`, { code: 'TIMEOUT', retryable: true });
-
-  const reason = (error as { cause?: { code?: string; message?: string } } | null)?.cause;
-  // fetch refuses a short list of ports outright (SMTP, IRC, …) for safety.
-  if (reason?.message === 'bad port') {
-    return new NodeFailure(`${host} uses a port that web requests are not allowed to use. Pick another port.`, {
-      code: 'BAD_PORT',
-      retryable: false,
-    });
-  }
-  const cause = reason?.code;
-  switch (cause) {
-    case 'ECONNREFUSED':
-      return new NodeFailure(`Could not connect to ${host}: nothing is listening there.`, { code: cause, retryable: true });
-    case 'ENOTFOUND':
-    case 'EAI_AGAIN':
-      return new NodeFailure(`No such host: ${host}. Check the address.`, { code: cause, retryable: cause === 'EAI_AGAIN' });
-    case 'ECONNRESET':
-      return new NodeFailure(`${host} closed the connection before answering.`, { code: cause, retryable: true });
-    case 'ETIMEDOUT':
-    case 'UND_ERR_CONNECT_TIMEOUT':
-      return new NodeFailure(`Could not reach ${host} in time.`, { code: cause, retryable: true });
-    case 'CERT_HAS_EXPIRED':
-    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
-    case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
-      return new NodeFailure(`${host} has a certificate this machine does not trust.`, { code: cause, retryable: false });
-    default:
-      return new NodeFailure(`The request to ${host} failed: ${error instanceof Error ? error.message : String(error)}.`, {
-        code: cause ?? 'NETWORK',
-        retryable: true,
-      });
-  }
+  return describeNetworkFailure(error, host, timeoutMs, timedOut);
 }
+
+/**
+ * Version 2: the same box on `ctx.http`. It gains a credential slot (applied
+ * by the client — the box never sees the token), a response-size limit, and
+ * `bytes` and `timing` on every result.
+ */
+export const httpManifest = defineManifest({
+  type: 'core.http.request',
+  version: 2,
+  title: 'HTTP Request',
+  group: 'core',
+  description: 'Make an HTTP request, once per item.',
+  executionMode: 'perItem',
+  ports: {
+    inputs: [{ id: 'main', required: true, join: 'all' }],
+    outputs: [{ id: 'main' }, { id: 'error' }],
+  },
+  credentials: [
+    {
+      name: 'auth',
+      label: 'Sign in with',
+      accepts: ['httpAuth@1', 'httpSigner@1'],
+      description: 'A saved credential, added to the request for you. Leave empty to send none.',
+    },
+  ],
+  config: {
+    fields: [
+      { name: 'method', label: 'Method', type: 'select', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], default: 'GET' },
+      {
+        name: 'url',
+        label: 'URL',
+        type: 'expression',
+        required: true,
+        description: 'The address to call. Use {{ $json.field }} to build it from the incoming item.',
+      },
+      { name: 'headers', label: 'Headers', type: 'json', default: {}, description: 'An object of header name → value. Put secrets in a credential, not here.' },
+      { name: 'body', label: 'Body', type: 'json', description: 'Sent as JSON. Ignored for GET.' },
+      { name: 'timeoutMs', label: 'Give up after (ms)', type: 'number', default: 30_000 },
+      { name: 'maxResponseKb', label: 'Largest answer (KB)', type: 'number', default: 10_240, description: 'A bigger answer fails the box rather than being cut short.' },
+    ],
+  },
+  defaults: { policy: { retry: { maxAttempts: 3, backoffMs: 500, maxBackoffMs: 30_000 } } },
+});
+
+const httpNode = defineExecutor(
+  httpManifest,
+  async (ctx) => {
+    const auth = await ctx.credential('auth');
+    const out: Item[] = [];
+    for (const [index, item] of ctx.items.entries()) {
+      const cfg = ctx.resolveConfig<{
+        method?: HttpMethod;
+        url?: string;
+        headers?: Record<string, string>;
+        body?: JsonValue;
+        timeoutMs?: number;
+        maxResponseKb?: number;
+      }>({ json: item.data, items: ctx.items.map((i) => i.data) });
+      if (!cfg.url) throw new NodeFailure('No URL configured', { code: 'CONFIG', errorClass: 'validation' });
+      const method = cfg.method ?? 'GET';
+
+      const res = await ctx.http.request({
+        method,
+        url: cfg.url,
+        // Forwarded so a retried step is recognised as the same step by any
+        // provider that honours it.
+        headers: { 'idempotency-key': ctx.idempotencyKey, ...(cfg.headers ?? {}) },
+        ...(cfg.body !== undefined && method !== 'GET' ? { body: cfg.body } : {}),
+        signal: ctx.signal,
+        timeoutMs: cfg.timeoutMs ?? 30_000,
+        maxResponseBytes: (cfg.maxResponseKb ?? 10_240) * 1024,
+        ...(auth ? { auth } : {}),
+      });
+
+      if (!res.ok) {
+        // The class decides the engine's policy (§11.1): 5xx and 429 are worth
+        // another attempt; 4xx will fail identically next time.
+        const { errorClass, retryable } = classifyHttpStatus(res.status);
+        ctx.fail(`HTTP ${res.status} from ${new URL(cfg.url).host}`, { code: `HTTP_${res.status}`, errorClass, retryable });
+      }
+
+      let body: JsonValue;
+      const text = res.text();
+      try {
+        body = text ? (JSON.parse(text) as JsonValue) : null;
+      } catch {
+        body = text;
+      }
+      out.push({
+        data: { status: res.status, body, bytes: res.bytes, timing: res.timing, headers: res.headers } as JsonValue,
+        lineage: [{ sourceNode: ctx.nodeId, sourcePort: 'main', itemIndex: index }],
+      });
+    }
+    return ctx.emit('main', out);
+  },
+  // Every v1 setting means the same in v2, and the new ones have defaults.
+  { migrateFrom: { 1: (config) => config } },
+);
 
 /* --------------------------------------------------------------------- log */
 
@@ -543,9 +669,11 @@ export const coreManifests: NodeManifest[] = [
   scheduleTrigger,
   webhookTrigger,
   setManifest,
+  splitManifest,
   ifManifest,
   switchManifest,
   mergeManifest,
+  httpManifestV1,
   httpManifest,
   logManifest,
   forEachManifest,
@@ -560,9 +688,11 @@ export const coreNodes: NodeDefinition[] = [
   scheduleTriggerNode,
   webhookTriggerNode,
   setNode,
+  splitNode,
   ifNode,
   switchNode,
   mergeNode,
+  httpNodeV1,
   httpNode,
   logNode,
 ];
